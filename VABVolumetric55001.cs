@@ -25,7 +25,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 //This namespace holds Strategies in this folder and is required. Do not change it. 
 namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
-	public class VABVolumetric55000 : Strategy
+	public class VABVolumetric55001 : Strategy
 	{
 		private double sumPriceVolume;
         private double sumVolume;
@@ -63,7 +63,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			if (State == State.SetDefaults)
 			{
 				Description									= @"Strategy OFDeltaProcent avec delta %";
-				Name										= "VABVolumetric55000";
+				Name										= "VABVolumetric55001";
 				Calculate									= Calculate.OnBarClose;
 				EntriesPerDirection							= 1;
 				EntryHandling								= EntryHandling.AllEntries;
@@ -85,7 +85,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				Qty											= 1;
 				Sl											= 15;
 				Pt											= 10;
-				
+				EnableDynamicStops = false;
+				UseBarSizeForStops = false; 
 				// Paramètres VAB
                 ResetPeriod = 120;
                 MinBarsForSignal = 10;
@@ -146,10 +147,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			{
 				ResetValues(DateTime.MinValue);
 				AddPlot(new Stroke(POCColor, 2), PlotStyle.Dot, "POC");
-				SetStopLoss(@"Long", CalculationMode.Ticks, Sl, false);
-				SetStopLoss(@"Short", CalculationMode.Ticks, Sl, false);
-				SetProfitTarget(@"Long", CalculationMode.Ticks, Pt);
-				SetProfitTarget(@"Short", CalculationMode.Ticks, Pt);
+				// SetStopLoss(@"Long", CalculationMode.Ticks, Sl, false);
+				// SetStopLoss(@"Short", CalculationMode.Ticks, Sl, false);
+				// SetProfitTarget(@"Long", CalculationMode.Ticks, Pt);
+				// SetProfitTarget(@"Short", CalculationMode.Ticks, Pt);
 			}
 			else if (State == State.DataLoaded)
             {
@@ -290,6 +291,21 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
             if (showUpArrow)
             {
+				if (UseBarSizeForStops)
+                {
+                    SetStopsBasedOnBarSize(true);
+                }
+                else if (EnableDynamicStops)
+                {
+                    SetDynamicStopsAndTargets(true);
+                }
+                else
+                {
+                    // Définir le stop loss et le profit target par défaut
+                    SetStopLoss(CalculationMode.Ticks, Sl);
+                    SetProfitTarget(CalculationMode.Ticks, Pt);
+                }
+				
 				EnterLong(Convert.ToInt32(Qty), @"Long");
                 Draw.ArrowUp(this, "UpArrow" + CurrentBar, true, 0, Low[0] - 2 * TickSize, UpArrowColor);
                 upperBreakoutCount++;
@@ -314,6 +330,21 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             }
             else if (showDownArrow)
             {
+				if (UseBarSizeForStops)
+                {
+                    SetStopsBasedOnBarSize(false);
+                }
+                else if (EnableDynamicStops)
+                {
+                    SetDynamicStopsAndTargets(false);
+                }
+                else
+                {
+                    // Définir le stop loss et le profit target par défaut
+                    SetStopLoss(CalculationMode.Ticks, Sl);
+                    SetProfitTarget(CalculationMode.Ticks, Pt);
+                }
+				
 				EnterShort(Convert.ToInt32(Qty), @"Short");
                 Draw.ArrowDown(this, "DownArrow" + CurrentBar, true, 0, High[0] + 2 * TickSize, DownArrowColor);
                 lowerBreakoutCount++;
@@ -482,6 +513,45 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             return true;
         }
 		
+		private void SetDynamicStopsAndTargets(bool isLong)
+        {
+            double vwap = Values[0][0];
+            double stdDev1Upper = Values[1][0];
+            double stdDev1Lower = Values[2][0];
+
+            double ptDistance;
+            double slDistance;
+
+            if (isLong)
+            {
+                ptDistance = (stdDev1Upper - vwap) / TickSize;
+                slDistance = (vwap - stdDev1Lower) / TickSize;
+            }
+            else
+            {
+                ptDistance = (vwap - stdDev1Lower) / TickSize;
+                slDistance = (stdDev1Upper - vwap) / TickSize;
+            }
+
+            ptDistance = Math.Max(1, Math.Round(Math.Abs(ptDistance)));
+            slDistance = Math.Max(1, Math.Round(Math.Abs(slDistance)));
+
+            // Définir le stop loss et le profit target dynamiques
+            SetStopLoss(CalculationMode.Ticks, slDistance);
+            SetProfitTarget(CalculationMode.Ticks, ptDistance);
+        }
+
+        private void SetStopsBasedOnBarSize(bool isLong)
+        {
+            // Calculer la taille de la barre actuelle en ticks
+            double barSizeTicks = (High[0] - Low[0]) / TickSize;
+            barSizeTicks = Math.Max(1, Math.Round(Math.Abs(barSizeTicks)));
+
+            // Définir le stop loss et le profit target en fonction de la taille de la barre
+            SetStopLoss(CalculationMode.Ticks, barSizeTicks);
+            SetProfitTarget(CalculationMode.Ticks, barSizeTicks);
+        }
+		
 		private void ResetValues(DateTime resetTime)
         {
             sumPriceVolume = 0;
@@ -529,6 +599,14 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Display(Name="Pt", Order=3, GroupName="0.02_Etry_Parameters")]
 		public int Pt
 		{ get; set; }
+		
+		[NinjaScriptProperty]
+        [Display(Name = "Enable Dynamic Stops", Order = 4, GroupName = "0.02_Etry_Parameters")]
+        public bool EnableDynamicStops { get; set; }
+		
+		[NinjaScriptProperty]
+        [Display(Name = "Use Bar Size For Stops", Order = 5, GroupName = "0.02_Etry_Parameters")]
+        public bool UseBarSizeForStops { get; set; }
 		
 		// ###################################################### //
 		
