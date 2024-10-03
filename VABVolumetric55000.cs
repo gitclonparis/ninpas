@@ -27,15 +27,36 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
 	public class VABVolumetric55000 : Strategy
 	{
-		private OrderFlowCumulativeDelta OFCD1;
-		private Swing Swing1;
-		private Swing Swing2;
-		private Swing Swing3;
-		private OBV OBV1;
-		private SMA SMA1;
-		private Series<double> deltaCloseSeries;
-		public Calculate MyCalculateMode { get; set; }
-		private int[] touches = new int[300];
+		private double sumPriceVolume;
+        private double sumVolume;
+        private double sumSquaredPriceVolume;
+        private DateTime lastResetTime;
+        private int barsSinceReset;
+        private int upperBreakoutCount;
+        private int lowerBreakoutCount;
+        
+        private ADX ADX1;
+        private ATR ATR1;
+        private VOL VOL1;
+        private VOLMA VOLMA1;
+        
+        private double highestSTD3Upper;
+        private double lowestSTD3Lower;
+        private bool isFirstBarSinceReset;
+
+        private class VolumetricParameters
+        {
+            public bool Enabled { get; set; }
+            public double Min { get; set; }
+            public double Max { get; set; }
+        }
+
+        private VolumetricParameters[] upParameters;
+        private VolumetricParameters[] downParameters;
+		
+		private bool pocConditionEnabled;
+		private int pocTicksDistance;
+		private Series<double> pocSeries;
 		
 		protected override void OnStateChange()
 		{
@@ -43,8 +64,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			{
 				Description									= @"Strategy OFDeltaProcent avec delta %";
 				Name										= "VABVolumetric55000";
-				Calculate = MyCalculateMode;
-				// Calculate									= Calculate.OnBarClose;
+				Calculate									= Calculate.OnBarClose;
 				EntriesPerDirection							= 1;
 				EntryHandling								= EntryHandling.AllEntries;
 				IsExitOnSessionCloseStrategy				= true;
@@ -58,88 +78,132 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				TraceOrders									= false;
 				RealtimeErrorHandling						= RealtimeErrorHandling.StopCancelClose;
 				StopTargetHandling							= StopTargetHandling.PerEntryExecution;
-				BarsRequiredToTrade							= 20;
-				// Disable this property for performance gains in Strategy Analyzer optimizations
-				// See the Help Guide for additional information
 				IsInstantiatedOnEachOptimizationIteration	= false;
 				StartTime						= DateTime.Parse("15:30", System.Globalization.CultureInfo.InvariantCulture);
 				EndTime							= DateTime.Parse("22:00", System.Globalization.CultureInfo.InvariantCulture);
 				
 				Qty											= 1;
 				Sl											= 15;
-				Pt											= 70;
-				BeTarget									= 20;
-				BeOfSet										= 25;
+				Pt											= 10;
 				
-				Vol0T										= 2000;
-				Vol1T										= 2000;
-				Vol2T										= 2000;
-				seuilVolume 								= 10000;
-				seuilVolumeMax 								= 10000000;
-				
-				Delta0T										= 500;
-				Delta1T										= 500;
-				Delta2T										= 200;
-				Dsize										= 20;
-				DsizeT										= 60;
-				
-				PDelta0T									= 3;
-				PDelta1T									= 0;
-				PDelta2T									= 2;
-				
-				FSelAbsortion								= 1000;
-				FdeltaLow0									= 500;
-				FBuyAbsortion								= 1000;
-				FdeltaHigh0									= 500;
-				FmultipleDelta								= 3;
-				
-				VolumeMALength								= 20;
-				AtrThreshold								= 2;
-				atrThresholdMax								= 20;
-				AdxThreshold								= 25;
-				EMALength									= 30;
-				EMALength2									= 100;
-				smaOvbLength								= 14;
-				
-				MaxBuyTradesT								= 2;
-				MaxSellTradesT								= 2;
+				// Paramètres VAB
+                ResetPeriod = 120;
+                MinBarsForSignal = 10;
+                MaxBarsForSignal = 100;
+                MinEntryDistanceUP = 3;
+                MaxEntryDistanceUP = 40;
+                MaxUpperBreakouts = 3;
+                MinEntryDistanceDOWN = 3;
+                MaxEntryDistanceDOWN = 40;
+                MaxLowerBreakouts = 3;
+                FminADX = 0;
+                FmaxADX = 0;
+                FminATR = 0;
+                FmaxATR = 0;
+                FperiodVol = 9;
+
+                // Paramètres Limusine
+                MinimumTicks = 10;
+                MaximumTicks = 30;
+                ShowLimusineOpenCloseUP = true;
+                ShowLimusineOpenCloseDOWN = true;
+                ShowLimusineHighLowUP = true;
+                ShowLimusineHighLowDOWN = true;
+
+                // Nouveaux paramètres
+                EnableSlopeFilterUP = false;
+                MinSlopeValueUP = 0.0;
+                SlopeBarsCountUP = 5;
+
+                EnableSlopeFilterDOWN = false;
+                MinSlopeValueDOWN = 0.0;
+                SlopeBarsCountDOWN = 5;
+
+                EnableDistanceFromVWAPCondition = false;
+                MinDistanceFromVWAP = 10;
+                MaxDistanceFromVWAP = 50;
+
+                EnableSTD3HighLowTracking = false;
+
+                // Paramètres Volumetric Filter
+                UpArrowColor = Brushes.Green;
+                DownArrowColor = Brushes.Red;
+				POCColor = Brushes.Blue;
+				pocConditionEnabled = false;
+				pocTicksDistance = 2;
+
+                InitializeVolumetricParameters();
+
+                AddPlot(Brushes.Orange, "VWAP");
+                AddPlot(Brushes.Red, "StdDev1Upper");
+                AddPlot(Brushes.Red, "StdDev1Lower");
+                AddPlot(Brushes.Green, "StdDev2Upper");
+                AddPlot(Brushes.Green, "StdDev2Lower");
+                AddPlot(Brushes.Blue, "StdDev3Upper");
+                AddPlot(Brushes.Blue, "StdDev3Lower");
 			}
 			else if (State == State.Configure)
 			{
-				AddDataSeries(Data.BarsPeriodType.Tick, 1);
-				deltaCloseSeries = new Series<double>(this);
-				
-				OFCD1				= OrderFlowCumulativeDelta(CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, 0); // Initialisation de OrderFlowCumulativeDelta
-				Swing1				= Swing(Close, 5);
-				Swing2				= Swing(OFCD1.DeltaClose, 5);
-				Swing3				= Swing(OBV1, 5);
-				OBV1				= OBV(Close);
-				SMA1				= SMA(OBV1, 14);
-				if (UseTralingStop)
-				{
-					// SetTrailStop(@"Long", CalculationMode.Ticks, Sl, true);
-					// SetTrailStop(@"Short", CalculationMode.Ticks, Sl, true);
-					SetStopLoss(@"Long", CalculationMode.Ticks, Sl, false);
-					SetStopLoss(@"Short", CalculationMode.Ticks, Sl, false);
-					SetProfitTarget(@"Long", CalculationMode.Ticks, Pt);
-					SetProfitTarget(@"Short", CalculationMode.Ticks, Pt);
-				}
-				else
-				{
-					SetProfitTarget(@"Long", CalculationMode.Ticks, Pt);
-					SetProfitTarget(@"Short", CalculationMode.Ticks, Pt);
-					SetParabolicStop("Long", CalculationMode.Ticks, Sl, true, 0.09, 0.9, 0.09);
-					SetParabolicStop("Short", CalculationMode.Ticks, Sl, true, 0.09, 0.9, 0.09);
-				}
+				ResetValues(DateTime.MinValue);
+				AddPlot(new Stroke(POCColor, 2), PlotStyle.Dot, "POC");
+				SetStopLoss(@"Long", CalculationMode.Ticks, Sl, false);
+				SetStopLoss(@"Short", CalculationMode.Ticks, Sl, false);
+				SetProfitTarget(@"Long", CalculationMode.Ticks, Pt);
+				SetProfitTarget(@"Short", CalculationMode.Ticks, Pt);
 			}
+			else if (State == State.DataLoaded)
+            {
+                ADX1 = ADX(Close, 14);
+                ATR1 = ATR(Close, 14);
+                VOL1 = VOL(Close);
+                VOLMA1 = VOLMA(Close, Convert.ToInt32(FperiodVol));
+				pocSeries = new Series<double>(this);
+            }
 		}
+		private void InitializeVolumetricParameters()
+        {
+            upParameters = new VolumetricParameters[7];
+            downParameters = new VolumetricParameters[7];
+
+            for (int i = 0; i < 7; i++)
+            {
+                upParameters[i] = new VolumetricParameters();
+                downParameters[i] = new VolumetricParameters();
+            }
+
+            // Set default values (you can adjust these as needed)
+            SetDefaultParameterValues(upParameters[0], false, 200, 2000);    // BarDelta
+            SetDefaultParameterValues(upParameters[1], false, 10, 50);       // DeltaPercent
+            SetDefaultParameterValues(upParameters[2], false, 100, 1000);    // DeltaChange
+            SetDefaultParameterValues(upParameters[3], false, 1000, 10000);  // TotalBuyingVolume
+            SetDefaultParameterValues(upParameters[4], false, 0, 5000);      // TotalSellingVolume
+            SetDefaultParameterValues(upParameters[5], false, 100, 1000);    // Trades
+            SetDefaultParameterValues(upParameters[6], false, 2000, 20000);  // TotalVolume
+
+            // Set default values for down parameters (adjust as needed)
+            SetDefaultParameterValues(downParameters[0], false, 200, 2000);  // BarDelta (abs value)
+            SetDefaultParameterValues(downParameters[1], false, 10, 50);     // DeltaPercent (abs value)
+            SetDefaultParameterValues(downParameters[2], false, 100, 1000);  // DeltaChange (abs value)
+            SetDefaultParameterValues(downParameters[3], false, 0, 5000);    // TotalBuyingVolume
+            SetDefaultParameterValues(downParameters[4], false, 1000, 10000);// TotalSellingVolume
+            SetDefaultParameterValues(downParameters[5], false, 100, 1000);  // Trades
+            SetDefaultParameterValues(downParameters[6], false, 2000, 20000);// TotalVolume
+        }
+		
+		private void SetDefaultParameterValues(VolumetricParameters param, bool enabled, double min, double max)
+        {
+            param.Enabled = enabled;
+            param.Min = min;
+            param.Max = max;
+        }
 
 		protected override void OnBarUpdate()
 		{
 			if (BarsInProgress != 0) 
 				return;
 			
-			if (CurrentBars[0] < 20) return;
+			if (CurrentBar < 20 || !(Bars.BarsSeries.BarsType is NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType))
+				return;
 			
 			if ((Times[0][0].TimeOfDay < StartTime.TimeOfDay) || (Times[0][0].TimeOfDay > EndTime.TimeOfDay))
 			{
@@ -154,783 +218,940 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				return;
 			}
 			
-			if (BarsInProgress == 1)
-            {
-                // Update the secondary series of the cached indicator to stay in sync with BarsInProgress == 0
-                OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).Update(OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).BarsArray[1].Count - 1, 1);
-				OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, 0).Update(OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, 0).BarsArray[1].Count - 1, 1);
-				OFCD1.Update(OFCD1.BarsArray[1].Count - 1, 1);
-				// OrderFlowVWAP(BarsArray[0], VWAPResolution.Tick, BarsArray[0].TradingHours, VWAPStandardDeviations.Three, 1, 2, 3).Update(OrderFlowVWAP(BarsArray[0], VWAPResolution.Tick, BarsArray[0].TradingHours, VWAPStandardDeviations.Three, 1, 2, 3).BarsArray[1].Count - 1, 1);
-                return;
-            }
-			
-			// double currentVWAP = OrderFlowVWAP(VWAPResolution.Tick, TradingHours.String2TradingHours("CME US Index Futures RTH"), VWAPStandardDeviations.Three, 1, 2, 3).VWAP[0];
-			double currentDayLow = CurrentDayOHL().CurrentLow[0];
-            double currentDayHigh = CurrentDayOHL().CurrentHigh[0];
-			
-			bool isLowWithinRange0 = Low[0] <= currentDayLow;
-			bool isLowWithinRange1 = Low[0] <= currentDayLow || Low[1] <= currentDayLow;
-			bool isLowWithinRange2 = Low[0] <= currentDayLow || Low[1] <= currentDayLow || Low[2] <= currentDayLow;
-			bool isLowWithinRange6 = Low[0] <= currentDayLow || Low[1] <= currentDayLow || Low[2] <= currentDayLow || Low[3] <= currentDayLow || Low[4] <= currentDayLow || Low[5] <= currentDayLow || Low[6] <= currentDayLow;
-			
-			bool isHighWithinRange0 = High[0] >= currentDayHigh;
-			bool isHighWithinRange1 = High[0] >= currentDayHigh || High[1] >= currentDayHigh;
-			bool isHighWithinRange2 = High[0] >= currentDayHigh || High[1] >= currentDayHigh || High[2] >= currentDayHigh;
-			bool isHighWithinRange6 = High[0] >= currentDayHigh || High[1] >= currentDayHigh || High[2] >= currentDayHigh || High[3] >= currentDayHigh || High[4] >= currentDayHigh || High[5] >= currentDayHigh || High[6] >= currentDayHigh;
-			
-			bool isBreakEvenActive = false; // Contrôle si le break-even est actif
-            
-			double vol0 = Volume[0];
-			double vol1 = Volume[1];
-			double vol2 = Volume[2];
-			double delta0 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).DeltaClose[0];
-            double delta1 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).DeltaClose[1];
-            double delta2 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).DeltaClose[2];
-			double deltaLow0 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).DeltaLow[0];
-			double deltaLow1 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).DeltaLow[1];
-			double deltaLow2 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).DeltaLow[2];
-			double deltaHigh0 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).DeltaHigh[0];
-			double deltaHigh1 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).DeltaHigh[1];
-			double deltaHigh2 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, 0).DeltaHigh[2];
-			double deltaSessionClose0 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, 0).DeltaClose[0];
-			double deltaSessionClose1 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, 0).DeltaClose[1];
-			double deltaSessionClose2 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, 0).DeltaClose[2];
-			double deltaSessionOpen0 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, 0).DeltaOpen[0];
-			double deltaSessionOpen1 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, 0).DeltaOpen[1];
-			double deltaSessionOpen2 = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, 0).DeltaOpen[2];
-			double delta0_size = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Bar, Dsize).DeltaClose[0];
-			double deltaSC0SMA = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, Dsize).DeltaClose[0];
-			double pdelta0 = (delta0 / vol0) * 100;
-			double pdelta1 = (delta1 / vol1) * 100;
-			double pdelta2 = (delta2 / vol2) * 100;
-			double volumeTotal = Volume[0] + Volume[1] + Volume[2];
-			
-			// VolumeAndATRStrategy
-			double v = Volume[0];
-			double va = SMA(Volume, VolumeMALength)[0];
-			double atr = ATR(14)[0];
-			double adx = ADX(14)[0];
-			double ema = EMA(Close, EMALength)[0];
-			double ema2 = EMA(Close, EMALength2)[0];
-			double trendLineValue = TrendLines(Close, 5, 4, 25, true)[0];
-			// OBV1 = OBV(Close);
-			// SMA1 = SMA(OBV1, smaOvbLength);
-			deltaCloseSeries[0] = OrderFlowCumulativeDelta(BarsArray[0], CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, Dsize).DeltaClose[0];
-			double smaDeltaSC0 = SMA(deltaCloseSeries, smaOvbLength)[0];
-			double upperValue = Bollinger(2, 14).Upper[0];
-			double lowerValue = Bollinger(2, 14).Lower[0];
-			
-			// ####################
-			double SwingHigh1 = High[Math.Max(0, Swing(5).SwingHighBar(0, 1, 100))];
-			double SwingHigh2 = High[Math.Max(0, Swing(5).SwingHighBar(0, 2, 100))];
-			double SwingHigh3 = High[Math.Max(0, Swing(5).SwingHighBar(0, 3, 100))];
-			
-			double SwingLow1 = Low[Math.Max(0, Swing(5).SwingLowBar(0, 1, 100))];
-			double SwingLow2 = Low[Math.Max(0, Swing(5).SwingLowBar(0, 2, 100))];
-			double SwingLow3 = Low[Math.Max(0, Swing(5).SwingLowBar(0, 3, 100))];
-			
-			double SelAbsortion = deltaLow0 - delta0;
-			int SelAbsortionInt = Convert.ToInt32(Math.Abs(SelAbsortion));
-			int deltaLow0Int = Convert.ToInt32(Math.Abs(deltaLow0));
-			
-			double BuyAbsortion = deltaHigh0 - delta0;
-			int BuyAbsortionInt = Convert.ToInt32(Math.Abs(BuyAbsortion));
-			int deltaHigh0Int = Convert.ToInt32(Math.Abs(deltaHigh0));
-			
-			
-			// Convertir les valeurs delta en nombres positifs (en supposant qu'elles sont dans la plage d'entiers)
-			int positiveDelta0 = Convert.ToInt32(Math.Abs(delta0));
-			int positiveDeltaLow0 = Convert.ToInt32(Math.Abs(deltaLow0));
-			int positiveDeltaHigh0 = Convert.ToInt32(Math.Abs(deltaHigh0));
-			
-			// Multiplier delta0 par 3 (la raison de cette multiplication devrait être documentée)
-			int multipleDelta0 = positiveDelta0 * FmultipleDelta;
-			
-			// Vérifier si les autres deltas sont supérieurs ou égaux à trois fois delta0
-			bool isDeltaLow0GreaterDelta0 = positiveDeltaLow0 >= multipleDelta0;
-			bool isDeltaHigh0GreaterDelta0 = positiveDeltaHigh0 >= multipleDelta0;
-			
-			bool isHigh01 = High[0] > High[1];
-			bool isLow01 = Low[0] < Low[1];
-			bool orderEnteredBuy = false;
-			bool orderEnteredSell = false;
-			
-			// ####################
-			// Buy Condition
-				if ((!isVolOK || vol0 > Vol0T && vol1 > Vol1T && vol2 > Vol2T)
-					&& (!isvolumeTotalOK || volumeTotal > seuilVolume && volumeTotal < seuilVolumeMax)
-					&& (!isVsmaOK || v > va)
-					&& (!isAtrOK || atr > AtrThreshold && atr < atrThresholdMax)
-					&& (!isAdxOK || adx > AdxThreshold)
-					&& (!isDiOK || delta0 > delta1 && delta1 > delta2)
-					&& (!isPDiOK || pdelta0 > pdelta1 && pdelta1 > pdelta2)
-					&& (!isDeltaBarre0ForBuyOK || delta0 > Delta0T)
-					&& (!isDeltaBarre1ForBuyOK || delta1 > Delta1T)
-					&& (!isDeltaBarre2ForBuyOK || delta2 < -Delta2T)
-					&& (!isPrecentDeltaBarre0ForBuyOK || pdelta0 > PDelta0T)
-					&& (!isPrecentDeltaBarre1ForBuyOK || pdelta1 > PDelta1T)
-					&& (!isPrecentDeltaBarre2ForBuyOK || pdelta2 < -PDelta2T)
-					&& (!isDSession1ForBuy || deltaSessionClose0 > deltaSessionOpen1)
-					&& (!isDSession2ForBuy || deltaSessionClose0 > deltaSessionOpen2)
-					&& (!isEmaForBuy || Close[0] > ema)
-					&& (!isdelta0_sizeForBuy || delta0_size > DsizeT)
-					&& (!isDCforBuyok || delta0 > Delta0T && delta1 < -Delta1T)
-					&& (!isPrecentDCforBuyok || pdelta0 > PDelta0T && pdelta1 < -PDelta1T)
-					&& (!isTLForBuy || Close[0] > trendLineValue)
-					&& (!IsLowCurrentDayLow0 || isLowWithinRange0)
-					&& (!IsLowCurrentDayLow1 || isLowWithinRange1)
-					&& (!IsLowCurrentDayLow2 || isLowWithinRange2)
-					&& (!IsLowCurrentDayLow6 || isLowWithinRange6)
-					&& (!IsOVBforBuy || OBV1[0] > SMA1[0])
-					&& (!IsDeltaSC0SMAforBuy || deltaSC0SMA > smaDeltaSC0)
-					&& (!IsBollingerforBuy || Low[0] <= lowerValue)
-					&& (!isEmaForBuy2 || Close[0] > ema2 && ema > ema2)
-					&& (!isSwing1Buy || High[0] > Swing1.SwingHigh[0])
-					&& (!isSwing2Buy || OFCD1.DeltaClose[0] > Swing2.SwingHigh[0])
-					&& (!isSwing3Buy || OBV1[0] > Swing3.SwingHigh[0])
-					&& (!isSwingLowUp12 || SwingLow1 > SwingLow2)
-					&& (!isSwingLowUp23 || SwingLow2 > SwingLow3)
-					&& (Position.MarketPosition == MarketPosition.Flat)
-					&& (!isCloseUP || Close[0] > Open[0])
-					&& (!IsSelAsobtion || SelAbsortionInt >= FSelAbsortion)
-					&& (!isFdeltaLow0OK || deltaLow0Int >= FdeltaLow0)
-					&& (!isOkDeltaLow0GreaterDelta0 || isDeltaLow0GreaterDelta0)
-					&& (!isOkHigh01 || isHigh01)
-					)
-				{
-					// EnterLong(Convert.ToInt32(Qty), @"Long");
-					if (!SelOnly)
-					{
-						if (useMIT)
-						{
-							EnterLongMIT(0, false, Qty, GetCurrentBid(), @"Long");
-							orderEnteredBuy = true;
-							// touches[0]++;
-						}
-						else if (useLimit)
-						{
-							EnterLongLimit(0, false, Qty, GetCurrentBid(), @"Long");
-							orderEnteredBuy = true;
-							// touches[0]++;
-						}
-						else if (useMarket)
-						{
-							EnterLong(Convert.ToInt32(Qty), @"Long");
-							// EnterLong(1, Qty, @"Long");
-							orderEnteredBuy = true;
-							// touches[0]++;
-						}
-						else if (useStopMarket)
-						{
-							EnterLongStopMarket(0, false, Qty, GetCurrentBid(), @"Long");
-							orderEnteredBuy = true;
-							// touches[0]++;
-						}
-						// touches[0]++;	
-						// orderEnteredBuy = true;
-						return;
-					}
-				}
+			var currentBarVolumes = barsType.Volumes[CurrentBar];
+			// Calcul du POC
+			double pocPrice;
+			long maxVolume = currentBarVolumes.GetMaximumVolume(null, out pocPrice);
+			pocSeries[0] = pocPrice;
+			Values[0][0] = pocPrice;
 
-				// ######################
-				// Sell Condition
-				if ((!isVolOK || vol0 > Vol0T && vol1 > Vol1T && vol2 > Vol2T)
-					&& (!isvolumeTotalOK || volumeTotal > seuilVolume && volumeTotal < seuilVolumeMax)
-					&& (!isVsmaOK || v > va)
-					&& (!isAtrOK || atr > AtrThreshold && atr < atrThresholdMax)
-					&& (!isAdxOK || adx > AdxThreshold)
-					&& (!isDdOK || delta0 < delta1 && delta1 < delta2)
-					&& (!isPDdOK || pdelta0 < pdelta1 && pdelta1 < pdelta2)
-					&& (!isDeltaBarre0ForSelOK || delta0 < -Delta0T)
-					&& (!isDeltaBarre1ForSelOK || delta1 < -Delta1T)
-					&& (!isDeltaBarre2ForSelOK || delta2 > Delta2T)
-					&& (!isPrecentDeltaBarre0ForSelOK || pdelta0 < -PDelta0T)
-					&& (!isPrecentDeltaBarre1ForSelOK || pdelta1 < -PDelta1T)
-					&& (!isPrecentDeltaBarre2ForSelOK || pdelta2 > PDelta2T)
-					&& (!isDSession1ForDel || deltaSessionClose0 < deltaSessionOpen1)
-					&& (!isDSession2ForDel || deltaSessionClose0 < deltaSessionOpen2)
-					&& (!isEmaForSel || Close[0] < ema)
-					&& (!isdelta0_sizeForSel || delta0_size < -DsizeT)
-					&& (!isDCforSelok || delta0 < -Delta0T && delta1 > Delta1T)
-					&& (!isPrecentDCforSelok || pdelta0 < -PDelta0T && pdelta1 > PDelta1T)
-					&& (!isTLForSel || Close[0] < trendLineValue)
-					&& (!IsHighCurrentDayHigh0 || isHighWithinRange0)
-					&& (!IsHighCurrentDayHigh1 || isHighWithinRange1)
-					&& (!IsHighCurrentDayHigh2 || isHighWithinRange2)
-					&& (!IsHighCurrentDayHigh6 || isHighWithinRange6)
-					&& (!IsOVBforSel || OBV1[0] < SMA1[0])
-					&& (!IsDeltaSC0SMAforSel || deltaSC0SMA < smaDeltaSC0)
-					&& (!IsBollingerforSel || High[0] >= upperValue)
-					&& (!isEmaForSel2 || Close[0] < ema2 && ema < ema2)
-					&& (!isSwing1Sel || Low[0] < Swing1.SwingLow[0])
-					&& (!isSwing2Sel || OFCD1.DeltaClose[0] < Swing2.SwingLow[0])
-					&& (!isSwing3Sel || OBV1[0] < Swing3.SwingLow[0])
-					&& (!isSwingHighDown12 || SwingHigh1 < SwingHigh2)
-					&& (!isSwingHighDown23 || SwingHigh2 < SwingHigh3)
-					&& (Position.MarketPosition == MarketPosition.Flat)
-					&& (!isCloseDown || Close[0] < Open[0])
-					&& (!IsBuyAsobtion || BuyAbsortionInt >= FBuyAbsortion)
-					&& (!isFdeltaHigh0OK || deltaHigh0Int >= FdeltaHigh0)
-					&& (!isOkDeltaHigh0GreaterDelta0 || isDeltaHigh0GreaterDelta0)
-					&& (!isOKLow01 || isLow01)
-					)
-				{
-					// EnterShort(Convert.ToInt32(Qty), @"Short");
-					if (!BuyOnly)
-					{
-						if (useMIT)
-						{
-							EnterShortMIT(0, false, Qty, GetCurrentAsk(), @"Short");
-							orderEnteredSell = true;
-//							touches[i]++;
-						}
-						else if (useLimit)
-						{
-							EnterShortLimit(0, false, Qty, GetCurrentAsk(), @"Short");
-							orderEnteredSell = true;
-//							touches[i]++;
-						}
-						else if (useMarket)
-						{
-							EnterShort(Convert.ToInt32(Qty), @"Short");
-							// EnterShort(1, Qty, @"Short");
-							orderEnteredSell = true;
-//							touches[i]++;
-						}
-						else if (useStopMarket)
-						{
-							EnterShortStopMarket(0, false, Qty, GetCurrentAsk(), @"Short");
-							orderEnteredSell = true;
-//							touches[i]++;
-						}
-						// touches[i]++;	
-						// orderEnteredSell = true;
-						return;
-					}	
-				}
+            DateTime currentBarTime = Time[0];
+
+            if (Bars.IsFirstBarOfSession)
+            {
+                ResetValues(currentBarTime);
+            }
+            else if (lastResetTime != DateTime.MinValue && (currentBarTime - lastResetTime).TotalMinutes >= ResetPeriod)
+            {
+                ResetValues(currentBarTime);
+            }
+
+            // Calcul VWAP et écarts-types
+            double typicalPrice = (High[0] + Low[0] + Close[0]) / 3;
+            double volume = Volume[0];
+
+            sumPriceVolume += typicalPrice * volume;
+            sumVolume += volume;
+            sumSquaredPriceVolume += typicalPrice * typicalPrice * volume;
+
+            double vwap = sumPriceVolume / sumVolume;
+            double variance = (sumSquaredPriceVolume / sumVolume) - (vwap * vwap);
+            double stdDev = Math.Sqrt(variance);
+
+            Values[0][0] = vwap;
+            Values[1][0] = vwap + stdDev;
+            Values[2][0] = vwap - stdDev;
+            Values[3][0] = vwap + 2 * stdDev;
+            Values[4][0] = vwap - 2 * stdDev;
+            Values[5][0] = vwap + 3 * stdDev;
+            Values[6][0] = vwap - 3 * stdDev;
+
+            // Update STD3 high/low tracking
+            if (EnableSTD3HighLowTracking)
+            {
+                if (isFirstBarSinceReset)
+                {
+                    highestSTD3Upper = Values[5][0];
+                    lowestSTD3Lower = Values[6][0];
+                    isFirstBarSinceReset = false;
+                }
+                else
+                {
+                    highestSTD3Upper = Math.Max(highestSTD3Upper, Values[5][0]);
+                    lowestSTD3Lower = Math.Min(lowestSTD3Lower, Values[6][0]);
+                }
+            }
+
+            barsSinceReset++;
+
+            // Vérification des conditions combinées
+            bool showUpArrow = ShouldDrawUpArrow() && CheckVolumetricConditions(true);
+            bool showDownArrow = ShouldDrawDownArrow() && CheckVolumetricConditions(false);
+			
+			// Condition POC
+			if (pocConditionEnabled)
+			{
+				double closePrice = Close[0];
+				double tickSize = TickSize;
+		
+				showUpArrow = showUpArrow && (pocPrice <= closePrice - pocTicksDistance * tickSize);
+				showDownArrow = showDownArrow && (pocPrice >= closePrice + pocTicksDistance * tickSize);
+			}
+
+            if (showUpArrow)
+            {
+				EnterLong(Convert.ToInt32(Qty), @"Long");
+                Draw.ArrowUp(this, "UpArrow" + CurrentBar, true, 0, Low[0] - 2 * TickSize, UpArrowColor);
+                upperBreakoutCount++;
+
+                // Calcul de la distance entre VWAP et StdDev1 Lower (StdDev-1)
+                double distanceRed = Values[0][0] - Values[2][0]; // VWAP - StdDev1 Lower
+                double priceForRedDot = Close[0] - distanceRed;
+
+                // Dessiner le point rouge
+                Draw.Dot(this, "RedDotUp" + CurrentBar, true, 0, priceForRedDot, Brushes.Red);
+
+                // Calcul de la distance pour le point bleu (comme précédemment)
+                double distanceBlue = Values[1][0] - Values[0][0]; // StdDev1 Upper - VWAP
+                double priceForBlueDot = Close[0] + distanceBlue;
+
+                // Dessiner le point bleu
+                Draw.Dot(this, "BlueDotUp" + CurrentBar, true, 0, priceForBlueDot, Brushes.Blue);
+
+                // Dessiner le point blanc au prix actuel
+                Draw.Dot(this, "WhiteDotUp" + CurrentBar, true, 0, Close[0], Brushes.White);
+				Draw.Dot(this, "POCUP" + CurrentBar, false, 0, pocPrice - pocTicksDistance * TickSize, POCColor);
+            }
+            else if (showDownArrow)
+            {
+				EnterShort(Convert.ToInt32(Qty), @"Short");
+                Draw.ArrowDown(this, "DownArrow" + CurrentBar, true, 0, High[0] + 2 * TickSize, DownArrowColor);
+                lowerBreakoutCount++;
+
+                // Calcul de la distance entre StdDev1 Upper (StdDev+1) et VWAP
+                double distanceRed = Values[1][0] - Values[0][0]; // StdDev1 Upper - VWAP
+                double priceForRedDot = Close[0] + distanceRed;
+
+                // Dessiner le point rouge
+                Draw.Dot(this, "RedDotDown" + CurrentBar, true, 0, priceForRedDot, Brushes.Red);
+
+                // Calcul de la distance pour le point bleu (comme précédemment)
+                double distanceBlue = Values[0][0] - Values[2][0]; // VWAP - StdDev1 Lower
+                double priceForBlueDot = Close[0] - distanceBlue;
+
+                // Dessiner le point bleu
+                Draw.Dot(this, "BlueDotDown" + CurrentBar, true, 0, priceForBlueDot, Brushes.Blue);
+
+                // Dessiner le point blanc au prix actuel
+                Draw.Dot(this, "WhiteDotDown" + CurrentBar, true, 0, Close[0], Brushes.White);
+				Draw.Dot(this, "POCDOWN" + CurrentBar, false, 0, pocPrice + pocTicksDistance * TickSize, POCColor);
+            }
 		}
+		
+		private bool ShouldDrawUpArrow()
+        {
+            // Calculate the distance from VWAP
+            double vwap = Values[0][0];
+            double distanceInTicks = (Close[0] - vwap) / TickSize;
+
+            bool bvaCondition = (Close[0] > Open[0]) &&
+                   (!OKisADX || (ADX1[0] > FminADX && ADX1[0] < FmaxADX)) &&
+                   (!OKisATR || (ATR1[0] > FminATR && ATR1[0] < FmaxATR)) &&
+                   (!OKisVOL || (VOL1[0] > VOLMA1[0])) &&
+                   (!OKisAfterBarsSinceResetUP || (barsSinceReset > MinBarsForSignal && barsSinceReset < MaxBarsForSignal)) &&
+                   (!OKisAboveUpperThreshold || Close[0] > (Values[1][0] + MinEntryDistanceUP * TickSize)) &&
+                   (!OKisWithinMaxEntryDistance || Close[0] <= (Values[1][0] + MaxEntryDistanceUP * TickSize)) &&
+                   (!OKisUpperBreakoutCountExceeded || upperBreakoutCount < MaxUpperBreakouts) &&
+                   (!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP));
+
+            double openCloseDiff = Math.Abs(Open[0] - Close[0]) / TickSize;
+            double highLowDiff = Math.Abs(High[0] - Low[0]) / TickSize;
+            bool limusineCondition = (ShowLimusineOpenCloseUP && openCloseDiff >= MinimumTicks && openCloseDiff <= MaximumTicks && Close[0] > Open[0]) ||
+                                    (ShowLimusineHighLowUP && highLowDiff >= MinimumTicks && highLowDiff <= MaximumTicks && Close[0] > Open[0]);
+									
+            // New Slope Condition for UP Arrows
+            if (EnableSlopeFilterUP)
+            {
+                if (CurrentBar < SlopeBarsCountUP)
+                    return false; // Not enough bars to calculate slope
+
+                double oldValue = Values[5][SlopeBarsCountUP - 1]; // StdDev3Upper value SlopeBarsCountUP bars ago
+                double newValue = Values[5][0]; // Current StdDev3Upper value
+
+                double slopePerBar = (newValue - oldValue) / SlopeBarsCountUP;
+
+                if (slopePerBar < MinSlopeValueUP)
+                    return false; // The slope is not steep enough upwards
+            }
+
+            // New condition for STD3 Upper at its highest
+            bool std3Condition = !EnableSTD3HighLowTracking || Values[5][0] >= highestSTD3Upper;
+
+            return bvaCondition && limusineCondition && std3Condition;
+        }
+		
+		private bool ShouldDrawDownArrow()
+        {
+            // Calculate the distance from VWAP
+            double vwap = Values[0][0];
+            double distanceInTicks = (vwap - Close[0]) / TickSize;
+
+            bool bvaCondition = (Close[0] < Open[0]) &&
+                   (!OKisADX || (ADX1[0] > FminADX && ADX1[0] < FmaxADX)) &&
+                   (!OKisATR || (ATR1[0] > FminATR && ATR1[0] < FmaxATR)) &&
+                   (!OKisVOL || (VOL1[0] > VOLMA1[0])) &&
+                   (!OKisAfterBarsSinceResetDown || (barsSinceReset > MinBarsForSignal && barsSinceReset < MaxBarsForSignal)) &&
+                   (!OKisBelovLowerThreshold || Close[0] < (Values[2][0] - MinEntryDistanceDOWN * TickSize)) &&
+                   (!OKisWithinMaxEntryDistanceDown || Close[0] >= (Values[2][0] - MaxEntryDistanceDOWN * TickSize)) &&
+                   (!OKisLowerBreakoutCountExceeded || lowerBreakoutCount < MaxLowerBreakouts) &&
+                   (!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP));
+
+            double openCloseDiff = Math.Abs(Open[0] - Close[0]) / TickSize;
+            double highLowDiff = Math.Abs(High[0] - Low[0]) / TickSize;
+            bool limusineCondition = (ShowLimusineOpenCloseDOWN && openCloseDiff >= MinimumTicks && openCloseDiff <= MaximumTicks && Close[0] < Open[0]) ||
+                                    (ShowLimusineHighLowDOWN && highLowDiff >= MinimumTicks && highLowDiff <= MaximumTicks && Close[0] < Open[0]);
+
+            // New Slope Condition for DOWN Arrows
+            if (EnableSlopeFilterDOWN)
+            {
+                if (CurrentBar < SlopeBarsCountDOWN)
+                    return false; // Not enough bars to calculate slope
+
+                double oldValue = Values[6][SlopeBarsCountDOWN - 1]; // StdDev3Lower value SlopeBarsCountDOWN bars ago
+                double newValue = Values[6][0]; // Current StdDev3Lower value
+
+                double slopePerBar = (newValue - oldValue) / SlopeBarsCountDOWN;
+
+                if (slopePerBar > -MinSlopeValueDOWN)
+                    return false; // The slope is not steep enough downwards
+            }
+
+            // New condition for STD3 Lower at its lowest
+            bool std3Condition = !EnableSTD3HighLowTracking || Values[6][0] <= lowestSTD3Lower;
+
+            return bvaCondition && limusineCondition && std3Condition;
+        }
+		
+		private bool CheckVolumetricConditions(bool isUpDirection)
+        {
+            if (!(Bars.BarsSeries.BarsType is NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType))
+                return false;
+
+            var currentBarVolumes = barsType.Volumes[CurrentBar];
+            var previousBarVolumes = barsType.Volumes[CurrentBar - 1];
+
+            double[] volumetricValues = new double[7];
+            volumetricValues[0] = currentBarVolumes.BarDelta;
+            volumetricValues[1] = currentBarVolumes.GetDeltaPercent();
+            volumetricValues[2] = volumetricValues[0] - previousBarVolumes.BarDelta;
+            volumetricValues[3] = currentBarVolumes.TotalBuyingVolume;
+            volumetricValues[4] = currentBarVolumes.TotalSellingVolume;
+            volumetricValues[5] = currentBarVolumes.Trades;
+            volumetricValues[6] = currentBarVolumes.TotalVolume;
+
+            VolumetricParameters[] parameters = isUpDirection ? upParameters : downParameters;
+
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                if (parameters[i].Enabled)
+                {
+                    if (isUpDirection)
+                    {
+                        switch (i)
+                        {
+                            case 0: // BarDelta
+                            case 1: // DeltaPercent
+                            case 2: // DeltaChange
+                                if (volumetricValues[i] < parameters[i].Min || volumetricValues[i] > parameters[i].Max)
+                                    return false;
+                                break;
+                            default:
+                                if (volumetricValues[i] < parameters[i].Min || volumetricValues[i] > parameters[i].Max)
+                                    return false;
+                                break;
+                        }
+                    }
+                    else // Down direction
+                    {
+                        switch (i)
+                        {
+                            case 0: // BarDelta
+                            case 1: // DeltaPercent
+                            case 2: // DeltaChange
+                                if (volumetricValues[i] > -parameters[i].Min || volumetricValues[i] < -parameters[i].Max)
+                                    return false;
+                                break;
+                            default:
+                                if (volumetricValues[i] < parameters[i].Min || volumetricValues[i] > parameters[i].Max)
+                                    return false;
+                                break;
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+		
+		private void ResetValues(DateTime resetTime)
+        {
+            sumPriceVolume = 0;
+            sumVolume = 0;
+            sumSquaredPriceVolume = 0;
+            barsSinceReset = 0;
+            upperBreakoutCount = 0;
+            lowerBreakoutCount = 0;
+            lastResetTime = resetTime;
+            // Reset STD3 high/low tracking
+            isFirstBarSinceReset = true;
+            highestSTD3Upper = double.MinValue;
+            lowestSTD3Lower = double.MaxValue;
+        }
+		
 		#region Properties
 		
 		[NinjaScriptProperty]
 		[PropertyEditor("NinjaTrader.Gui.Tools.TimeEditorKey")]
-		[Display(Name="StartTime", Order=1, GroupName="0.Time_Parameters")]
+		[Display(Name="StartTime", Order=1, GroupName="0.01_Time_Parameters")]
 		public DateTime StartTime
 		{ get; set; }
 
 		[NinjaScriptProperty]
 		[PropertyEditor("NinjaTrader.Gui.Tools.TimeEditorKey")]
-		[Display(Name="EndTime", Order=2, GroupName="0.Time_Parameters")]
+		[Display(Name="EndTime", Order=2, GroupName="0.01_Time_Parameters")]
 		public DateTime EndTime
 		{ get; set; }
 		
 		// ############# 1.Etry_Parameters ####################
 		[NinjaScriptProperty]
 		[Range(1, int.MaxValue)]
-		[Display(Name="Qty", Order=1, GroupName="1.Etry_Parameters")]
+		[Display(Name="Qty", Order=1, GroupName="0.02_Etry_Parameters")]
 		public int Qty
 		{ get; set; }
 
 		[NinjaScriptProperty]
 		[Range(1, int.MaxValue)]
-		[Display(Name="Sl", Order=2, GroupName="1.Etry_Parameters")]
+		[Display(Name="Sl", Order=2, GroupName="0.02_Etry_Parameters")]
 		public int Sl
 		{ get; set; }
 		
 		[NinjaScriptProperty]
 		[Range(1, int.MaxValue)]
-		[Display(Name="Pt", Order=3, GroupName="1.Etry_Parameters")]
+		[Display(Name="Pt", Order=3, GroupName="0.02_Etry_Parameters")]
 		public int Pt
 		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Range(1, int.MaxValue)]
-		[Display(Name="MaxBuyTradesT", Order=4, GroupName="1.Etry_Parameters")]
-		public int MaxBuyTradesT
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Range(1, int.MaxValue)]
-		[Display(Name="MaxSellTradesT", Order=5, GroupName="1.Etry_Parameters")]
-		public int MaxSellTradesT
-		{ get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="UseBE", Description="Use Break Even", Order=6, GroupName="1.Etry_Parameters")]
-		public bool UseBE { get; set; }
-		
-		[NinjaScriptProperty]
-		[Range(0, int.MaxValue)]
-		[Display(Name="BeTarget", Order=7, GroupName="1.Etry_Parameters")]
-		public int BeTarget
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Range(0, int.MaxValue)]
-		[Display(Name="BeOfSet", Order=8, GroupName="1.Etry_Parameters")]
-		public int BeOfSet
-		{ get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="UseTralingStop", Description="UseTralingStop", Order=9, GroupName="1.Etry_Parameters")]
-		public bool UseTralingStop { get; set; }
-		
-		// Paramètres de la stratégie
-		[Display(Name = "Buy Only", GroupName = "1.Etry_Parameters", Order = 10)]
-		public bool BuyOnly { get; set; }
-	
-		[Display(Name = "Sell Only", GroupName = "1.Etry_Parameters", Order = 11)]
-		public bool SelOnly { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="useMIT", Description="useMIT", Order=12, GroupName="1.Etry_Parameters")]
-		public bool useMIT { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="useLimit", Description="useLimit", Order=13, GroupName="1.Etry_Parameters")]
-		public bool useLimit { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="useMarket", Description="useMarket", Order=14, GroupName="1.Etry_Parameters")]
-		public bool useMarket { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="useStopMarket", Description="useStopMarket", Order=15, GroupName="1.Etry_Parameters")]
-		public bool useStopMarket { get; set; }
-		
-		// [Range(0, 1), NinjaScriptProperty]
-		// [Display(Name="UseStopNormal", Description="UseStopNormal", Order=10, GroupName="Etry_Parameters")]
-		// public bool UseStopNormal { get; set; }
-		
-		// ######### 2.Cummun_Setup #########################
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isVolOK", Description="isVolOK", Order=1, GroupName="2.Cummun_Setup")]
-		public bool isVolOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isvolumeTotalOK", Description="isvolumeTotalOK", Order=2, GroupName="2.Cummun_Setup")]
-		public bool isvolumeTotalOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isVsmaOK", Description="isVsmaOK", Order=3, GroupName="2.Cummun_Setup")]
-		public bool isVsmaOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isAtrOK", Description="isAtrOK", Order=4, GroupName="2.Cummun_Setup")]
-		public bool isAtrOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isAdxOK", Description="isAdxOK", Order=5, GroupName="2.Cummun_Setup")]
-		public bool isAdxOK { get; set; }
-	
-		/// ########## 3.Buy_Setup ########################
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDiOK", Description="isDiOK", Order=1, GroupName="3.Buy_Setup")]
-		public bool isDiOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isPDiOK", Description="isPDiOK", Order=2, GroupName="3.Buy_Setup")]
-		public bool isPDiOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDeltaBarre0ForBuyOK", Description="isDeltaBarre0ForBuyOK", Order=3, GroupName="3.Buy_Setup")]
-		public bool isDeltaBarre0ForBuyOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDeltaBarre1ForBuyOK", Description="isDeltaBarre1ForBuyOK", Order=4, GroupName="3.Buy_Setup")]
-		public bool isDeltaBarre1ForBuyOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDeltaBarre2ForBuyOK", Description="isDeltaBarre2ForBuyOK", Order=5, GroupName="3.Buy_Setup")]
-		public bool isDeltaBarre2ForBuyOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isPrecentDeltaBarre0ForBuyOK", Description="isPrecentDeltaBarre0ForBuyOK", Order=6, GroupName="3.Buy_Setup")]
-		public bool isPrecentDeltaBarre0ForBuyOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isPrecentDeltaBarre1ForBuyOK", Description="isPrecentDeltaBarre1ForBuyOK", Order=7, GroupName="3.Buy_Setup")]
-		public bool isPrecentDeltaBarre1ForBuyOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isPrecentDeltaBarre2ForBuyOK", Description="isPrecentDeltaBarre2ForBuyOK", Order=8, GroupName="3.Buy_Setup")]
-		public bool isPrecentDeltaBarre2ForBuyOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDSession1ForBuy", Description="isDSession1ForBuy", Order=9, GroupName="3.Buy_Setup")]
-		public bool isDSession1ForBuy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDSession2ForBuy", Description="isDSession2ForBuy", Order=10, GroupName="3.Buy_Setup")]
-		public bool isDSession2ForBuy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isEmaForBuy", Description="isEmaForBuy", Order=11, GroupName="3.Buy_Setup")]
-		public bool isEmaForBuy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isdelta0_sizeForBuy", Description="isdelta0_sizeForBuy", Order=12, GroupName="3.Buy_Setup")]
-		public bool isdelta0_sizeForBuy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDCforBuyok", Description="isDCforBuyok", Order=13, GroupName="3.Buy_Setup")]
-		public bool isDCforBuyok { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isPrecentDCforBuyok", Description="isPrecentDCforBuyok", Order=14, GroupName="3.Buy_Setup")]
-		public bool isPrecentDCforBuyok { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isTLForBuy", Description="isTLForBuy", Order=15, GroupName="3.Buy_Setup")]
-		public bool isTLForBuy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsLowCurrentDayLow0", Description="IsLowCurrentDayLow0", Order=16, GroupName="3.Buy_Setup")]
-		public bool IsLowCurrentDayLow0 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsLowCurrentDayLow1", Description="IsLowCurrentDayLow1", Order=17, GroupName="3.Buy_Setup")]
-		public bool IsLowCurrentDayLow1 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsLowCurrentDayLow2", Description="IsLowCurrentDayLow2", Order=18, GroupName="3.Buy_Setup")]
-		public bool IsLowCurrentDayLow2 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsLowCurrentDayLow6", Description="IsLowCurrentDayLow6", Order=19, GroupName="3.Buy_Setup")]
-		public bool IsLowCurrentDayLow6 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsOVBforBuy", Description="IsOVBforBuy", Order=20, GroupName="3.Buy_Setup")]
-		public bool IsOVBforBuy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsDeltaSC0SMAforBuy", Description="IsDeltaSC0SMAforBuy", Order=21, GroupName="3.Buy_Setup")]
-		public bool IsDeltaSC0SMAforBuy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsBollingerforBuy", Description="IsBollingerforBuy", Order=22, GroupName="3.Buy_Setup")]
-		public bool IsBollingerforBuy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isEmaForBuy2", Description="isEmaForBuy2", Order=23, GroupName="3.Buy_Setup")]
-		public bool isEmaForBuy2 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isSwing1Buy", Description="isSwing1Buy", Order=24, GroupName="3.Buy_Setup")]
-		public bool isSwing1Buy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isSwing2Buy", Description="isSwing2Buy", Order=25, GroupName="3.Buy_Setup")]
-		public bool isSwing2Buy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isSwing3Buy", Description="isSwing3Buy", Order=26, GroupName="3.Buy_Setup")]
-		public bool isSwing3Buy { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isSwingLowUp12", Description="isSwingLowUp12", Order=27, GroupName="3.Buy_Setup")]
-		public bool isSwingLowUp12 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isSwingLowUp23", Description="isSwingLowUp23", Order=28, GroupName="3.Buy_Setup")]
-		public bool isSwingLowUp23 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isCloseUP", Description="isCloseUP", Order=29, GroupName="3.Buy_Setup")]
-		public bool isCloseUP { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsSelAsobtion", Description="IsSelAsobtion", Order=30, GroupName="3.Buy_Setup")]
-		public bool IsSelAsobtion { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isFdeltaLow0OK", Description="isFdeltaLow0OK", Order=31, GroupName="3.Buy_Setup")]
-		public bool isFdeltaLow0OK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isOkDeltaLow0GreaterDelta0", Description="isOkDeltaLow0GreaterDelta0", Order=32, GroupName="3.Buy_Setup")]
-		public bool isOkDeltaLow0GreaterDelta0 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isOkHigh01", Description="isOkHigh01", Order=33, GroupName="3.Buy_Setup")]
-		public bool isOkHigh01 { get; set; }
-		
-		// ##########  4.Sel_Setup  ########################
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDdOK", Description="isDdOK", Order=1, GroupName="4.Sel_Setup")]
-		public bool isDdOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isPDdOK", Description="isPDdOK", Order=2, GroupName="4.Sel_Setup")]
-		public bool isPDdOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDeltaBarre0ForSelOK", Description="isDeltaBarre0ForSelOK", Order=3, GroupName="4.Sel_Setup")]
-		public bool isDeltaBarre0ForSelOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDeltaBarre1ForSelOK", Description="isDeltaBarre1ForSelOK", Order=4, GroupName="4.Sel_Setup")]
-		public bool isDeltaBarre1ForSelOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDeltaBarre2ForSelOK", Description="isDeltaBarre2ForSelOK", Order=5, GroupName="4.Sel_Setup")]
-		public bool isDeltaBarre2ForSelOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isPrecentDeltaBarre0ForSelOK", Description="isPrecentDeltaBarre0ForSelOK", Order=6, GroupName="4.Sel_Setup")]
-		public bool isPrecentDeltaBarre0ForSelOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isPrecentDeltaBarre1ForSelOK", Description="isPrecentDeltaBarre1ForSelOK", Order=7, GroupName="4.Sel_Setup")]
-		public bool isPrecentDeltaBarre1ForSelOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isPrecentDeltaBarre2ForSelOK", Description="isPrecentDeltaBarre2ForSelOK", Order=8, GroupName="4.Sel_Setup")]
-		public bool isPrecentDeltaBarre2ForSelOK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDSession1ForDel", Description="isDSession1ForDel", Order=9, GroupName="4.Sel_Setup")]
-		public bool isDSession1ForDel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDSession2ForDel", Description="isDSession2ForDel", Order=10, GroupName="4.Sel_Setup")]
-		public bool isDSession2ForDel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isEmaForSel", Description="isEmaForSel", Order=11, GroupName="4.Sel_Setup")]
-		public bool isEmaForSel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isdelta0_sizeForSel", Description="isdelta0_sizeForSel", Order=12, GroupName="4.Sel_Setup")]
-		public bool isdelta0_sizeForSel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isDCforSelok", Description="isDCforSelok", Order=13, GroupName="4.Sel_Setup")]
-		public bool isDCforSelok { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isPrecentDCforSelok", Description="isPrecentDCforSelok", Order=14, GroupName="4.Sel_Setup")]
-		public bool isPrecentDCforSelok { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isTLForSel", Description="isTLForSel", Order=15, GroupName="4.Sel_Setup")]
-		public bool isTLForSel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsHighCurrentDayHigh0", Description="IsHighCurrentDayHigh0", Order=16, GroupName="4.Sel_Setup")]
-		public bool IsHighCurrentDayHigh0 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsHighCurrentDayHigh1", Description="IsHighCurrentDayHigh1", Order=17, GroupName="4.Sel_Setup")]
-		public bool IsHighCurrentDayHigh1 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsHighCurrentDayHigh2", Description="IsHighCurrentDayHigh2", Order=18, GroupName="4.Sel_Setup")]
-		public bool IsHighCurrentDayHigh2 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsHighCurrentDayHigh6", Description="IsHighCurrentDayHigh6", Order=19, GroupName="4.Sel_Setup")]
-		public bool IsHighCurrentDayHigh6 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsOVBforSel", Description="IsOVBforSel", Order=20, GroupName="4.Sel_Setup")]
-		public bool IsOVBforSel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsDeltaSC0SMAforSel", Description="IsDeltaSC0SMAforSel", Order=21, GroupName="4.Sel_Setup")]
-		public bool IsDeltaSC0SMAforSel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsBollingerforSel", Description="IsBollingerforSel", Order=22, GroupName="4.Sel_Setup")]
-		public bool IsBollingerforSel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isEmaForSel2", Description="isEmaForSel2", Order=23, GroupName="4.Sel_Setup")]
-		public bool isEmaForSel2 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isSwing1Sel", Description="isSwing1Sel", Order=24, GroupName="4.Sel_Setup")]
-		public bool isSwing1Sel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isSwing2Sel", Description="isSwing2Sel", Order=25, GroupName="4.Sel_Setup")]
-		public bool isSwing2Sel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isSwing3Sel", Description="isSwing3Sel", Order=26, GroupName="4.Sel_Setup")]
-		public bool isSwing3Sel { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isSwingHighDown12", Description="isSwingHighDown12", Order=27, GroupName="4.Sel_Setup")]
-		public bool isSwingHighDown12 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isSwingHighDown23", Description="isSwingHighDown23", Order=28, GroupName="4.Sel_Setup")]
-		public bool isSwingHighDown23 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isCloseDown", Description="isCloseDown", Order=29, GroupName="4.Sel_Setup")]
-		public bool isCloseDown { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="IsBuyAsobtion", Description="IsBuyAsobtion", Order=30, GroupName="4.Sel_Setup")]
-		public bool IsBuyAsobtion { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isFdeltaHigh0OK", Description="isFdeltaHigh0OK", Order=31, GroupName="4.Sel_Setup")]
-		public bool isFdeltaHigh0OK { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isOkDeltaHigh0GreaterDelta0", Description="isOkDeltaHigh0GreaterDelta0", Order=32, GroupName="4.Sel_Setup")]
-		public bool isOkDeltaHigh0GreaterDelta0 { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="isOKLow01", Description="isOKLow01", Order=33, GroupName="4.Sel_Setup")]
-		public bool isOKLow01 { get; set; }
-		
-		// ###########  5.VolumeAndATR  #######################
-		[NinjaScriptProperty]
-		[Range(1, int.MaxValue)]
-		[Display(Name="VolumeMALength", Order=1, GroupName="5.VolumeAndATR")]
-		public int VolumeMALength
-		{ get; set; }
+		// ###################################################### //
+		
+		 // Propriétés BVA
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Reset Period (Minutes)", Order = 1, GroupName = "0.1_BVA Parameters")]
+        public int ResetPeriod { get; set; }
 
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name = "Min Bars for Signal", Order = 2, GroupName = "0.1_BVA Parameters")]
+        public int MinBarsForSignal { get; set; }
+		
+		[Range(1, int.MaxValue)]
+		[Display(Name = "Max Bars for Signal", Description = "Nombre maximum de barres depuis la réinitialisation pour un signal", Order = 3, GroupName = "0.1_BVA Parameters")]
+		public int MaxBarsForSignal
+		{ get; set; }
+		
+		
+		// Propriétés Limusine
+        [NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name = "Minimum Ticks", Description = "Nombre minimum de ticks pour une limusine", Order = 1, GroupName = "0.2_Limusine Parameters")]
+		public int MinimumTicks { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name = "Maximum Ticks", Description = "Nombre maximum de ticks pour une limusine", Order = 2, GroupName = "0.2_Limusine Parameters")]
+		public int MaximumTicks { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Afficher Limusine Open-Close UP", Description = "Afficher les limusines Open-Close UP", Order = 3, GroupName = "0.2_Limusine Parameters")]
+		public bool ShowLimusineOpenCloseUP { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Afficher Limusine Open-Close DOWN", Description = "Afficher les limusines Open-Close DOWN", Order = 4, GroupName = "0.2_Limusine Parameters")]
+		public bool ShowLimusineOpenCloseDOWN { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Afficher Limusine High-Low UP", Description = "Afficher les limusines High-Low UP", Order = 5, GroupName = "0.2_Limusine Parameters")]
+		public bool ShowLimusineHighLowUP { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Afficher Limusine High-Low DOWN", Description = "Afficher les limusines High-Low DOWN", Order = 6, GroupName = "0.2_Limusine Parameters")]
+		public bool ShowLimusineHighLowDOWN { get; set; }
+
+        // ############ Buy #############
+		// Buy
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name = "Min Entry Distance UP", Order = 1, GroupName = "0.3_Buy")]
+		public int MinEntryDistanceUP { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name = "Max Entry Distance UP", Order = 2, GroupName = "0.3_Buy")]
+		public int MaxEntryDistanceUP { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name = "Max Upper Breakouts", Order = 3, GroupName = "0.3_Buy")]
+		public int MaxUpperBreakouts { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisAfterBarsSinceResetUP", Description = "Check Bars Since Reset UP", Order = 1, GroupName = "0.3_Buy")]
+		public bool OKisAfterBarsSinceResetUP { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisAboveUpperThreshold", Description = "Check Above Upper Threshold", Order = 1, GroupName = "0.3_Buy")]
+		public bool OKisAboveUpperThreshold { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisWithinMaxEntryDistance", Description = "Check Within Max Entry Distance", Order = 1, GroupName = "0.3_Buy")]
+		public bool OKisWithinMaxEntryDistance { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisUpperBreakoutCountExceeded", Description = "Check Upper Breakout Count Exceeded", Order = 1, GroupName = "0.3_Buy")]
+		public bool OKisUpperBreakoutCountExceeded { get; set; }
+		
+		// ############ Sell #############
+		// Sell
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name = "Min Entry Distance DOWN", Order = 1, GroupName = "0.4_Sell")]
+		public int MinEntryDistanceDOWN { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name = "Max Entry Distance DOWN", Order = 2, GroupName = "0.4_Sell")]
+		public int MaxEntryDistanceDOWN { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name = "Max Lower Breakouts", Order = 3, GroupName = "0.4_Sell")]
+		public int MaxLowerBreakouts { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisAfterBarsSinceResetDown", Description = "Check Bars Since Reset Down", Order = 1, GroupName = "0.4_Sell")]
+		public bool OKisAfterBarsSinceResetDown { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisBelovLowerThreshold", Description = "Check Below Lower Threshold", Order = 1, GroupName = "0.4_Sell")]
+		public bool OKisBelovLowerThreshold { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisWithinMaxEntryDistanceDown", Description = "Check Within Max Entry Distance Down", Order = 1, GroupName = "0.4_Sell")]
+		public bool OKisWithinMaxEntryDistanceDown { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisLowerBreakoutCountExceeded", Description = "Check Lower Breakout Count Exceeded", Order = 1, GroupName = "0.4_Sell")]
+		public bool OKisLowerBreakoutCountExceeded { get; set; }
+		
+		// New Parameters for Slope Filter (updated)
+        [Display(Name = "Enable Slope Filter UP", Order = 1, GroupName = "0.5_Slope Filter UP")]
+        public bool EnableSlopeFilterUP { get; set; }
+
+        [Display(Name = "Minimum Slope Value UP", Order = 2, GroupName = "0.5_Slope Filter UP")]
+        public double MinSlopeValueUP { get; set; }
+
+        [Display(Name = "Slope Bars Count UP", Order = 3, GroupName = "0.5_Slope Filter UP")]
+        public int SlopeBarsCountUP { get; set; }
+
+        [Display(Name = "Enable Slope Filter DOWN", Order = 1, GroupName = "0.6_Slope Filter DOWN")]
+        public bool EnableSlopeFilterDOWN { get; set; }
+
+        [Display(Name = "Minimum Slope Value DOWN", Order = 2, GroupName = "0.6_Slope Filter DOWN")]
+        public double MinSlopeValueDOWN { get; set; }
+
+        [Display(Name = "Slope Bars Count DOWN", Order = 3, GroupName = "0.6_Slope Filter DOWN")]
+        public int SlopeBarsCountDOWN { get; set; }
+		
+		// Distance VWAP
+		[NinjaScriptProperty]
+		[Display(Name = "Enable Distance From VWAP Condition", Order = 1, GroupName = "0.7_Distance_VWAP")]
+		public bool EnableDistanceFromVWAPCondition { get; set; }
+		
+		[Range(1, int.MaxValue)]
+		[NinjaScriptProperty]
+		[Display(Name = "Minimum Distance From VWAP (Ticks)", Order = 2, GroupName = "0.7_Distance_VWAP")]
+		public int MinDistanceFromVWAP { get; set; }
+		
+		[Range(1, int.MaxValue)]
+		[NinjaScriptProperty]
+		[Display(Name = "Maximum Distance From VWAP (Ticks)", Order = 3, GroupName = "0.7_Distance_VWAP")]
+		public int MaxDistanceFromVWAP { get; set; }
+		
+		[NinjaScriptProperty]
+        [Display(Name="Enable STD3 High/Low Tracking", Description="Track highest STD3 Upper and lowest STD3 Lower since last reset", Order=1000, GroupName="1.0_STD3 Tracking")]
+        public bool EnableSTD3HighLowTracking { get; set; }
+		
+		// ############ ADX #############
+		// ADX
 		[NinjaScriptProperty]
 		[Range(0, double.MaxValue)]
-		[Display(Name="AtrThreshold", Order=2, GroupName="5.VolumeAndATR")]
-		public double AtrThreshold
-		{ get; set; }
+		[Display(Name = "Fmin ADX", Order = 1, GroupName = "ADX")]
+		public double FminADX { get; set; }
 		
-		[Range(0, double.MaxValue), NinjaScriptProperty]
-		[Display(ResourceType = typeof(Custom.Resource), Name = "atrThresholdMax", GroupName = "5.VolumeAndATR", Order = 3)]
-		public double atrThresholdMax
-		{ get; set; }
+		[NinjaScriptProperty]
+		[Range(0, double.MaxValue)]
+		[Display(Name = "Fmax ADX", Order = 2, GroupName = "ADX")]
+		public double FmaxADX { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisADX", Description = "Check ADX", Order = 1, GroupName = "ADX")]
+		public bool OKisADX { get; set; }
+		
+		// ############ ATR #############
+		// ATR
+		[NinjaScriptProperty]
+		[Range(0, double.MaxValue)]
+		[Display(Name = "Fmin ATR", Order = 1, GroupName = "ATR")]
+		public double FminATR { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, double.MaxValue)]
+		[Display(Name = "Fmax ATR", Order = 2, GroupName = "ATR")]
+		public double FmaxATR { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisATR", Description = "Check ATR", Order = 1, GroupName = "ATR")]
+		public bool OKisATR { get; set; }
+		
+		// ############ Volume #############
+		// Volume
+		[NinjaScriptProperty]
+		[Range(0, int.MaxValue)]
+		[Display(Name = "Fperiod Vol", Order = 1, GroupName = "Volume")]
+		public int FperiodVol { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, 1)]
+		[Display(Name = "OKisVOL", Description = "Check Volume", Order = 1, GroupName = "Volume")]
+		public bool OKisVOL { get; set; }
 
-		[NinjaScriptProperty]
-		[Range(1, int.MaxValue)]
-		[Display(Name="AdxThreshold", Order=4, GroupName="5.VolumeAndATR")]
-		public int AdxThreshold
-		{ get; set; }
+	   // ... (autres propriétés)
+        [Browsable(false)]
+        [XmlIgnore]
+        public Series<double> VWAP => Values[0];
 
-		[NinjaScriptProperty]
-		[Range(1, int.MaxValue)]
-		[Display(Name="EMALength", Order=5, GroupName="5.VolumeAndATR")]
-		public int EMALength
-		{ get; set; }
+        [Browsable(false)]
+        [XmlIgnore]
+        public Series<double> StdDev1Upper => Values[1];
+
+        [Browsable(false)]
+        [XmlIgnore]
+        public Series<double> StdDev1Lower => Values[2];
+
+        
+		// ##################### Propriétés Volumetric Filter #################################
+		// Propriétés Volumetric Filter
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Up Arrow Color", Order = 1, GroupName = "Visuals")]
+        public Brush UpArrowColor { get; set; }
+
+        [Browsable(false)]
+        public string UpArrowColorSerializable
+        {
+            get { return Serialize.BrushToString(UpArrowColor); }
+            set { UpArrowColor = Serialize.StringToBrush(value); }
+        }
+
+        [NinjaScriptProperty]
+        [XmlIgnore]
+        [Display(Name = "Down Arrow Color", Order = 2, GroupName = "Visuals")]
+        public Brush DownArrowColor { get; set; }
+
+        [Browsable(false)]
+        public string DownArrowColorSerializable
+        {
+            get { return Serialize.BrushToString(DownArrowColor); }
+            set { DownArrowColor = Serialize.StringToBrush(value); }
+        }
 		
 		[NinjaScriptProperty]
-		[Range(1, int.MaxValue)]
-		[Display(Name="EMALength2", Order=6, GroupName="5.VolumeAndATR")]
-		public int EMALength2
-		{ get; set; }
+		[XmlIgnore]
+		[Display(Name="POC Color", Description="Color for POC", Order=3, GroupName="Visuals")]
+		public Brush POCColor { get; set; }
+		
+		[Browsable(false)]
+		public Series<double> POC
+		{
+			get { return Values[0]; }
+		}
 		
 		[NinjaScriptProperty]
-		[Range(1, int.MaxValue)]
-		[Display(Name="smaOvbLength", Order=7, GroupName="5.VolumeAndATR")]
-		public int smaOvbLength
-		{ get; set; }
-		
-		// ############  6.DC ######################
-		[NinjaScriptProperty]
-		[Display(Name="Vol0T", Order=1, GroupName="6.DC")]
-		public int Vol0T
-		{ get; set; }
+		[Display(Name="Enable POC Condition", Description="Enable the Point of Control condition", Order=1, GroupName="POC Parameters")]
+		public bool POCConditionEnabled
+		{
+			get { return pocConditionEnabled; }
+			set { pocConditionEnabled = value; }
+		}
 		
 		[NinjaScriptProperty]
-		[Display(Name="Vol1T", Order=2, GroupName="6.DC")]
-		public int Vol1T
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Vol2T", Order=3, GroupName="6.DC")]
-		public int Vol2T
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Delta0T", Order=4, GroupName="6.DC")]
-		public int Delta0T
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Delta1T", Order=5, GroupName="6.DC")]
-		public int Delta1T
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Delta2T", Order=6, GroupName="6.DC")]
-		public int Delta2T
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="PDelta0T", Order=7, GroupName="6.DC")]
-		public int PDelta0T
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="PDelta1T", Order=8, GroupName="6.DC")]
-		public int PDelta1T
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="PDelta2T", Order=9, GroupName="6.DC")]
-		public int PDelta2T
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="seuilVolume", Order=10, GroupName="6.DC")]
-		public double seuilVolume
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="seuilVolumeMax", Order=11, GroupName="6.DC")]
-		public double seuilVolumeMax
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Dsize", Order=12, GroupName="6.DC")]
-		public int Dsize
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="DsizeT", Order=13, GroupName="6.DC")]
-		public int DsizeT
-		{ get; set; }
-		
-		
-		[NinjaScriptProperty]
-		[Display(Name="FSelAbsortion", Order=14, GroupName="6.DC")]
-		public int FSelAbsortion
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="FdeltaLow0", Order=15, GroupName="6.DC")]
-		public int FdeltaLow0
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="FBuyAbsortion", Order=16, GroupName="6.DC")]
-		public int FBuyAbsortion
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="FdeltaHigh0", Order=17, GroupName="6.DC")]
-		public int FdeltaHigh0
-		{ get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="FmultipleDelta", Order=18, GroupName="6.DC")]
-		public int FmultipleDelta
-		{ get; set; }
-		
-		// ############# 7.TradCount #####################
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="UsetradCount", Description="Use trad Count", Order=1, GroupName="7.TradCount")]
-		public bool UsetradCount { get; set; }
-		
-		[Range(0, 1), NinjaScriptProperty]
-		[Display(Name="UseVwapReset", Description="Use Vwap Reset", Order=2, GroupName="7.TradCount")]
-		public bool UseVwapReset { get; set; }
-		
+		[Range(1, 10)]
+		[Display(Name="POC Ticks Distance", Description="Number of ticks for POC distance from close", Order=2, GroupName="POC Parameters")]
+		public int POCTicksDistance
+		{
+			get { return pocTicksDistance; }
+			set { pocTicksDistance = Math.Max(1, value); }
+		}
+
+        // UP Parameters
+        [NinjaScriptProperty]
+        [Display(Name = "Bar Delta UP Enabled", Order = 1, GroupName = "2.01_BarDeltaUP")]
+        public bool BarDeltaUPEnabled
+        {
+            get { return upParameters[0].Enabled; }
+            set { upParameters[0].Enabled = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Min Bar Delta UP", Order = 2, GroupName = "2.01_BarDeltaUP")]
+        public double MinBarDeltaUP
+        {
+            get { return upParameters[0].Min; }
+            set { upParameters[0].Min = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Max Bar Delta UP", Order = 3, GroupName = "2.01_BarDeltaUP")]
+        public double MaxBarDeltaUP
+        {
+            get { return upParameters[0].Max; }
+            set { upParameters[0].Max = value; }
+        }
+
+        // Delta Percent UP
+        [NinjaScriptProperty]
+        [Display(Name = "Delta Percent UP Enabled", Order = 1, GroupName = "2.02_DeltaPercentUP")]
+        public bool DeltaPercentUPEnabled
+        {
+            get { return upParameters[1].Enabled; }
+            set { upParameters[1].Enabled = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Min Delta Percent UP", Order = 2, GroupName = "2.02_DeltaPercentUP")]
+        public double MinDeltaPercentUP
+        {
+            get { return upParameters[1].Min; }
+            set { upParameters[1].Min = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Max Delta Percent UP", Order = 3, GroupName = "2.02_DeltaPercentUP")]
+        public double MaxDeltaPercentUP
+        {
+            get { return upParameters[1].Max; }
+            set { upParameters[1].Max = value; }
+        }
+
+        // Delta Change UP
+        [NinjaScriptProperty]
+        [Display(Name = "Delta Change UP Enabled", Order = 1, GroupName = "2.03_DeltaChangeUP")]
+        public bool DeltaChangeUPEnabled
+        {
+            get { return upParameters[2].Enabled; }
+            set { upParameters[2].Enabled = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Min Delta Change UP", Order = 2, GroupName = "2.03_DeltaChangeUP")]
+        public double MinDeltaChangeUP
+        {
+            get { return upParameters[2].Min; }
+            set { upParameters[2].Min = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Max Delta Change UP", Order = 3, GroupName = "2.03_DeltaChangeUP")]
+        public double MaxDeltaChangeUP
+        {
+            get { return upParameters[2].Max; }
+            set { upParameters[2].Max = value; }
+        }
+
+        // Total Buying Volume UP
+        [NinjaScriptProperty]
+        [Display(Name = "Total Buying Volume UP Enabled", Order = 1, GroupName = "2.04_TotalBuyingVolumeUP")]
+        public bool TotalBuyingVolumeUPEnabled
+        {
+            get { return upParameters[3].Enabled; }
+            set { upParameters[3].Enabled = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Min Total Buying Volume UP", Order = 2, GroupName = "2.04_TotalBuyingVolumeUP")]
+        public double MinTotalBuyingVolumeUP
+        {
+            get { return upParameters[3].Min; }
+            set { upParameters[3].Min = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Max Total Buying Volume UP", Order = 3, GroupName = "2.04_TotalBuyingVolumeUP")]
+        public double MaxTotalBuyingVolumeUP
+        {
+            get { return upParameters[3].Max; }
+            set { upParameters[3].Max = value; }
+        }
+
+        // Total Selling Volume UP
+        [NinjaScriptProperty]
+        [Display(Name = "Total Selling Volume UP Enabled", Order = 1, GroupName = "2.05_TotalSellingVolumeUP")]
+        public bool TotalSellingVolumeUPEnabled
+        {
+            get { return upParameters[4].Enabled; }
+            set { upParameters[4].Enabled = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Min Total Selling Volume UP", Order = 2, GroupName = "2.05_TotalSellingVolumeUP")]
+        public double MinTotalSellingVolumeUP
+        {
+            get { return upParameters[4].Min; }
+            set { upParameters[4].Min = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Max Total Selling Volume UP", Order = 3, GroupName = "2.05_TotalSellingVolumeUP")]
+        public double MaxTotalSellingVolumeUP
+        {
+            get { return upParameters[4].Max; }
+            set { upParameters[4].Max = value; }
+        }
+
+        // Trades UP
+        [NinjaScriptProperty]
+        [Display(Name = "Trades UP Enabled", Order = 1, GroupName = "2.06_TradesUP")]
+        public bool TradesUPEnabled
+        {
+            get { return upParameters[5].Enabled; }
+            set { upParameters[5].Enabled = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Min Trades UP", Order = 2, GroupName = "2.06_TradesUP")]
+        public double MinTradesUP
+        {
+            get { return upParameters[5].Min; }
+            set { upParameters[5].Min = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Max Trades UP", Order = 3, GroupName = "2.06_TradesUP")]
+        public double MaxTradesUP
+        {
+            get { return upParameters[5].Max; }
+            set { upParameters[5].Max = value; }
+        }
+
+        // Total Volume UP
+        [NinjaScriptProperty]
+        [Display(Name = "Total Volume UP Enabled", Order = 1, GroupName = "2.07_TotalVolumeUP")]
+        public bool TotalVolumeUPEnabled
+        {
+            get { return upParameters[6].Enabled; }
+            set { upParameters[6].Enabled = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Min Total Volume UP", Order = 2, GroupName = "2.07_TotalVolumeUP")]
+        public double MinTotalVolumeUP
+        {
+            get { return upParameters[6].Min; }
+            set { upParameters[6].Min = value; }
+        }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Max Total Volume UP", Order = 3, GroupName = "2.07_TotalVolumeUP")]
+        public double MaxTotalVolumeUP
+        {
+            get { return upParameters[6].Max; }
+            set { upParameters[6].Max = value; }
+        }
+
+        // DOWN Parameters
+        // Bar Delta DOWN
+        [NinjaScriptProperty]
+        [Display(Name = "Bar Delta DOWN Enabled", Order = 1, GroupName = "3.01_BarDeltaDOWN")]
+        public bool BarDeltaDOWNEnabled
+        {
+            get { return downParameters[0].Enabled; }
+            set { downParameters[0].Enabled = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Min Bar Delta DOWN", Order = 2, GroupName = "3.01_BarDeltaDOWN")]
+        public double MinBarDeltaDOWN
+        {
+            get { return downParameters[0].Min; }
+            set { downParameters[0].Min = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Max Bar Delta DOWN", Order = 3, GroupName = "3.01_BarDeltaDOWN")]
+        public double MaxBarDeltaDOWN
+        {
+            get { return downParameters[0].Max; }
+            set { downParameters[0].Max = value; }
+        }
+        
+        // Delta Percent DOWN
+        [NinjaScriptProperty]
+        [Display(Name = "Delta Percent DOWN Enabled", Order = 1, GroupName = "3.02_DeltaPercentDOWN")]
+        public bool DeltaPercentDOWNEnabled
+        {
+            get { return downParameters[1].Enabled; }
+            set { downParameters[1].Enabled = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Min Delta Percent DOWN", Order = 2, GroupName = "3.02_DeltaPercentDOWN")]
+        public double MinDeltaPercentDOWN
+        {
+            get { return downParameters[1].Min; }
+            set { downParameters[1].Min = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Max Delta Percent DOWN", Order = 3, GroupName = "3.02_DeltaPercentDOWN")]
+        public double MaxDeltaPercentDOWN
+        {
+            get { return downParameters[1].Max; }
+            set { downParameters[1].Max = value; }
+        }
+        
+        // Delta Change DOWN
+        [NinjaScriptProperty]
+        [Display(Name = "Delta Change DOWN Enabled", Order = 1, GroupName = "3.03_DeltaChangeDOWN")]
+        public bool DeltaChangeDOWNEnabled
+        {
+            get { return downParameters[2].Enabled; }
+            set { downParameters[2].Enabled = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Min Delta Change DOWN", Order = 2, GroupName = "3.03_DeltaChangeDOWN")]
+        public double MinDeltaChangeDOWN
+        {
+            get { return downParameters[2].Min; }
+            set { downParameters[2].Min = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Max Delta Change DOWN", Order = 3, GroupName = "3.03_DeltaChangeDOWN")]
+        public double MaxDeltaChangeDOWN
+        {
+            get { return downParameters[2].Max; }
+            set { downParameters[2].Max = value; }
+        }
+        
+        // Total Buying Volume DOWN
+        [NinjaScriptProperty]
+        [Display(Name = "Total Buying Volume DOWN Enabled", Order = 1, GroupName = "3.04_TotalBuyingVolumeDOWN")]
+        public bool TotalBuyingVolumeDOWNEnabled
+        {
+            get { return downParameters[3].Enabled; }
+            set { downParameters[3].Enabled = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Min Total Buying Volume DOWN", Order = 2, GroupName = "3.04_TotalBuyingVolumeDOWN")]
+        public double MinTotalBuyingVolumeDOWN
+        {
+            get { return downParameters[3].Min; }
+            set { downParameters[3].Min = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Max Total Buying Volume DOWN", Order = 3, GroupName = "3.04_TotalBuyingVolumeDOWN")]
+        public double MaxTotalBuyingVolumeDOWN
+        {
+            get { return downParameters[3].Max; }
+            set { downParameters[3].Max = value; }
+        }
+        
+        // Total Selling Volume DOWN
+        [NinjaScriptProperty]
+        [Display(Name = "Total Selling Volume DOWN Enabled", Order = 1, GroupName = "3.05_TotalSellingVolumeDOWN")]
+        public bool TotalSellingVolumeDOWNEnabled
+        {
+            get { return downParameters[4].Enabled; }
+            set { downParameters[4].Enabled = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Min Total Selling Volume DOWN", Order = 2, GroupName = "3.05_TotalSellingVolumeDOWN")]
+        public double MinTotalSellingVolumeDOWN
+        {
+            get { return downParameters[4].Min; }
+            set { downParameters[4].Min = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Max Total Selling Volume DOWN", Order = 3, GroupName = "3.05_TotalSellingVolumeDOWN")]
+        public double MaxTotalSellingVolumeDOWN
+        {
+            get { return downParameters[4].Max; }
+            set { downParameters[4].Max = value; }
+        }
+        
+        // Trades DOWN
+        [NinjaScriptProperty]
+        [Display(Name = "Trades DOWN Enabled", Order = 1, GroupName = "3.06_TradesDOWN")]
+        public bool TradesDOWNEnabled
+        {
+            get { return downParameters[5].Enabled; }
+            set { downParameters[5].Enabled = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Min Trades DOWN", Order = 2, GroupName = "3.06_TradesDOWN")]
+        public double MinTradesDOWN
+        {
+            get { return downParameters[5].Min; }
+            set { downParameters[5].Min = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Max Trades DOWN", Order = 3, GroupName = "3.06_TradesDOWN")]
+        public double MaxTradesDOWN
+        {
+            get { return downParameters[5].Max; }
+            set { downParameters[5].Max = value; }
+        }
+        
+        // Total Volume DOWN
+        [NinjaScriptProperty]
+        [Display(Name = "Total Volume DOWN Enabled", Order = 1, GroupName = "3.07_TotalVolumeDOWN")]
+        public bool TotalVolumeDOWNEnabled
+        {
+            get { return downParameters[6].Enabled; }
+            set { downParameters[6].Enabled = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Min Total Volume DOWN", Order = 2, GroupName = "3.07_TotalVolumeDOWN")]
+        public double MinTotalVolumeDOWN
+        {
+            get { return downParameters[6].Min; }
+            set { downParameters[6].Min = value; }
+        }
+        
+        [NinjaScriptProperty]
+        [Display(Name = "Max Total Volume DOWN", Order = 3, GroupName = "3.07_TotalVolumeDOWN")]
+        public double MaxTotalVolumeDOWN
+        {
+            get { return downParameters[6].Max; }
+            set { downParameters[6].Max = value; }
+        }
+
 		#endregion
 	}
 }
