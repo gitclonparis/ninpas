@@ -86,7 +86,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				Sl											= 15;
 				Pt											= 10;
 				EnableDynamicStops = false;
-				UseBarSizeForStops = false; 
+				UseBarSizeForStops = false;
+				UseParabolicStop = false;
 				// Paramètres VAB
                 ResetPeriod = 120;
                 MinBarsForSignal = 10;
@@ -291,7 +292,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
             if (showUpArrow)
             {
-				if (UseBarSizeForStops)
+				if (UseParabolicStop)
+                {
+                    SetParabolicStop("Long", CalculationMode.Ticks, Sl, true, 0.09, 0.9, 0.09);
+                    SetProfitTarget("Long", CalculationMode.Ticks, Pt);
+                }
+                else if (UseBarSizeForStops)
                 {
                     SetStopsBasedOnBarSize(true);
                 }
@@ -330,7 +336,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             }
             else if (showDownArrow)
             {
-				if (UseBarSizeForStops)
+				if (UseParabolicStop)
+                {
+                    SetParabolicStop("Short", CalculationMode.Ticks, Sl, true, 0.09, 0.9, 0.09);
+                    SetProfitTarget("Short", CalculationMode.Ticks, Pt);
+                }
+                else if (UseBarSizeForStops)
                 {
                     SetStopsBasedOnBarSize(false);
                 }
@@ -607,6 +618,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[NinjaScriptProperty]
         [Display(Name = "Use Bar Size For Stops", Order = 5, GroupName = "0.02_Etry_Parameters")]
         public bool UseBarSizeForStops { get; set; }
+		
+		[NinjaScriptProperty]
+        [Display(Name = "Use Parabolic Stop", Order = 6, GroupName = "0.02_Etry_Parameters")]
+        public bool UseParabolicStop { get; set; }
 		
 		// ###################################################### //
 		
