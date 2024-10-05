@@ -143,11 +143,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 AddPlot(Brushes.Green, "StdDev2Lower");
                 AddPlot(Brushes.Blue, "StdDev3Upper");
                 AddPlot(Brushes.Blue, "StdDev3Lower");
+				AddPlot(new Stroke(POCColor, 2), PlotStyle.Dot, "POC");
 			}
 			else if (State == State.Configure)
 			{
 				ResetValues(DateTime.MinValue);
-				AddPlot(new Stroke(POCColor, 2), PlotStyle.Dot, "POC");
+				// AddPlot(new Stroke(POCColor, 2), PlotStyle.Dot, "POC");
 				// SetStopLoss(@"Long", CalculationMode.Ticks, Sl, false);
 				// SetStopLoss(@"Short", CalculationMode.Ticks, Sl, false);
 				// SetProfitTarget(@"Long", CalculationMode.Ticks, Pt);
