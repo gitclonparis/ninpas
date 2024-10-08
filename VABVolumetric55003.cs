@@ -58,17 +58,13 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		private int pocTicksDistance;
 		private Series<double> pocSeries;
 		
-		// New parameter for Value Area condition
-        private bool enableValueAreaCondition;
-        private bool useOpenForVACondition;
-		
-		// New parameters for cumulative delta condition
-        private bool enableCumulativeDeltaConditionUP;
-        private bool enableCumulativeDeltaConditionDOWN;
-        private int cumulativeDeltaBarsRangeUP;
-        private int cumulativeDeltaBarsRangeDOWN;
-        private int cumulativeDeltaJumpUP;
-        private int cumulativeDeltaJumpDOWN;
+		// Nouveaux champs pour la condition CumulativeDelta
+		private bool enableCumulativeDeltaConditionUP;
+		private bool enableCumulativeDeltaConditionDOWN;
+		private int cumulativeDeltaBarsRangeUP;
+		private int cumulativeDeltaBarsRangeDOWN;
+		private int cumulativeDeltaJumpUP;
+		private int cumulativeDeltaJumpDOWN;
 		
 		protected override void OnStateChange()
 		{
@@ -146,15 +142,17 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				pocConditionEnabled = false;
 				pocTicksDistance = 2;
 				// Initialize new parameter for Value Area condition
-                enableValueAreaCondition = false;
-                useOpenForVACondition = true;
-				// Initialize new parameters for cumulative delta condition
-                enableCumulativeDeltaConditionUP = false;
-                enableCumulativeDeltaConditionDOWN = false;
-                cumulativeDeltaBarsRangeUP = 3;
-                cumulativeDeltaBarsRangeDOWN = 3;
-                cumulativeDeltaJumpUP = 100;
-                cumulativeDeltaJumpDOWN = 100;
+                useOpenForVAConditionUP = false;
+				useOpenForVAConditionDown = false;
+				useLowForVAConditionUP = false;
+				useHighForVAConditionDown = false;
+				// Nouveaux paramètres pour la condition CumulativeDelta
+				enableCumulativeDeltaConditionUP = false;
+				enableCumulativeDeltaConditionDOWN = false;
+				cumulativeDeltaBarsRangeUP = 3;
+				cumulativeDeltaBarsRangeDOWN = 3;
+				cumulativeDeltaJumpUP = 1000;
+				cumulativeDeltaJumpDOWN = 1000;
 
                 InitializeVolumetricParameters();
 
@@ -299,46 +297,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				showDownArrow = showDownArrow && (pocPrice >= closePrice + pocTicksDistance * tickSize);
 			}
 			
-			// New Value Area condition
-            if (enableValueAreaCondition)
-            {
-                if (useOpenForVACondition)
-                {
-                    showUpArrow = showUpArrow && (Open[0] > Values[2][0] && Open[0] < Values[1][0]);
-                    showDownArrow = showDownArrow && (Open[0] > Values[2][0] && Open[0] < Values[1][0]);
-                }
-                else
-                {
-                    showUpArrow = showUpArrow && (Low[0] > Values[2][0] && Low[0] < Values[1][0]);
-                    showDownArrow = showDownArrow && (High[0] > Values[2][0] && High[0] < Values[1][0]);
-                }
-            }
-			
-			 // New Cumulative Delta condition
-            if (enableCumulativeDeltaConditionUP && showUpArrow)
-            {
-                for (int i = 1; i <= cumulativeDeltaBarsRangeUP; i++)
-                {
-                    if (CurrentBar - i < 0 || barsType.Volumes[CurrentBar - i].CumulativeDelta + cumulativeDeltaJumpUP > barsType.Volumes[CurrentBar - i + 1].CumulativeDelta)
-                    {
-                        showUpArrow = false;
-                        break;
-                    }
-                }
-            }
-
-            if (enableCumulativeDeltaConditionDOWN && showDownArrow)
-            {
-                for (int i = 1; i <= cumulativeDeltaBarsRangeDOWN; i++)
-                {
-                    if (CurrentBar - i < 0 || barsType.Volumes[CurrentBar - i].CumulativeDelta - cumulativeDeltaJumpDOWN < barsType.Volumes[CurrentBar - i + 1].CumulativeDelta)
-                    {
-                        showDownArrow = false;
-                        break;
-                    }
-                }
-            }
-
             if (showUpArrow)
             {
 				if (UseParabolicStop)
@@ -429,6 +387,46 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             }
 		}
 		
+		private bool CheckCumulativeDeltaConditionUP()
+		{
+			if (!enableCumulativeDeltaConditionUP || CurrentBar < cumulativeDeltaBarsRangeUP)
+				return true;
+	
+			NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType = Bars.BarsSeries.BarsType as NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType;
+			if (barsType == null)
+				return true;
+	
+			for (int i = 0; i < cumulativeDeltaBarsRangeUP - 1; i++)
+			{
+				if (barsType.Volumes[CurrentBar - i].CumulativeDelta <= 
+					barsType.Volumes[CurrentBar - i - 1].CumulativeDelta + cumulativeDeltaJumpUP)
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+	
+		private bool CheckCumulativeDeltaConditionDOWN()
+		{
+			if (!enableCumulativeDeltaConditionDOWN || CurrentBar < cumulativeDeltaBarsRangeDOWN)
+				return true;
+	
+			NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType = Bars.BarsSeries.BarsType as NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType;
+			if (barsType == null)
+				return true;
+	
+			for (int i = 0; i < cumulativeDeltaBarsRangeDOWN - 1; i++)
+			{
+				if (barsType.Volumes[CurrentBar - i].CumulativeDelta >= 
+					barsType.Volumes[CurrentBar - i - 1].CumulativeDelta - cumulativeDeltaJumpDOWN)
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+		
 		private bool ShouldDrawUpArrow()
         {
             // Calculate the distance from VWAP
@@ -443,7 +441,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                    (!OKisAboveUpperThreshold || Close[0] > (Values[1][0] + MinEntryDistanceUP * TickSize)) &&
                    (!OKisWithinMaxEntryDistance || Close[0] <= (Values[1][0] + MaxEntryDistanceUP * TickSize)) &&
                    (!OKisUpperBreakoutCountExceeded || upperBreakoutCount < MaxUpperBreakouts) &&
-                   (!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP));
+                   (!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP)) &&
+				   (!useOpenForVAConditionUP || (Open[0] > Values[2][0] && Open[0] < Values[1][0])) &&
+				   (!useLowForVAConditionUP || (Low[0] > Values[2][0] && Low[0] < Values[1][0]));
 
             double openCloseDiff = Math.Abs(Open[0] - Close[0]) / TickSize;
             double highLowDiff = Math.Abs(High[0] - Low[0]) / TickSize;
@@ -467,8 +467,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
             // New condition for STD3 Upper at its highest
             bool std3Condition = !EnableSTD3HighLowTracking || Values[5][0] >= highestSTD3Upper;
-
-            return bvaCondition && limusineCondition && std3Condition;
+			bool cumulativeDeltaCondition = CheckCumulativeDeltaConditionUP();
+			return bvaCondition && limusineCondition && std3Condition && cumulativeDeltaCondition;
         }
 		
 		private bool ShouldDrawDownArrow()
@@ -485,7 +485,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                    (!OKisBelovLowerThreshold || Close[0] < (Values[2][0] - MinEntryDistanceDOWN * TickSize)) &&
                    (!OKisWithinMaxEntryDistanceDown || Close[0] >= (Values[2][0] - MaxEntryDistanceDOWN * TickSize)) &&
                    (!OKisLowerBreakoutCountExceeded || lowerBreakoutCount < MaxLowerBreakouts) &&
-                   (!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP));
+                   (!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP)) &&
+				   (!useOpenForVAConditionDown || (Open[0] > Values[2][0] && Open[0] < Values[1][0])) &&
+				   (!useHighForVAConditionDown || (High[0] > Values[2][0] && High[0] < Values[1][0]));
 
             double openCloseDiff = Math.Abs(Open[0] - Close[0]) / TickSize;
             double highLowDiff = Math.Abs(High[0] - Low[0]) / TickSize;
@@ -509,8 +511,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
             // New condition for STD3 Lower at its lowest
             bool std3Condition = !EnableSTD3HighLowTracking || Values[6][0] <= lowestSTD3Lower;
-
-            return bvaCondition && limusineCondition && std3Condition;
+			bool cumulativeDeltaCondition = CheckCumulativeDeltaConditionDOWN();
+			return bvaCondition && limusineCondition && std3Condition && cumulativeDeltaCondition;
         }
 		
 		private bool CheckVolumetricConditions(bool isUpDirection)
@@ -691,15 +693,20 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		{ get; set; }
 		
 		[NinjaScriptProperty]
-        [Display(Name="Enable Value Area Condition", Order=4, GroupName="0.1_BVA Parameters")]
-        public bool EnableValueAreaCondition
-        { get; set; }
+        [Display(Name="use Open in VA Condition UP", Order=4, GroupName="0.1_BVA Parameters")]
+        public bool useOpenForVAConditionUP { get; set; }
 
         [NinjaScriptProperty]
-        [Display(Name="Use Open for Value Area Condition", Order=5, GroupName="0.1_BVA Parameters")]
-        public bool UseOpenForVACondition
-        { get; set; }
+        [Display(Name="use Open in VA Condition Down", Order=5, GroupName="0.1_BVA Parameters")]
+        public bool useOpenForVAConditionDown { get; set; }
 		
+		[NinjaScriptProperty]
+        [Display(Name="use Low in VA Condition UP", Order=6, GroupName="0.1_BVA Parameters")]
+        public bool useLowForVAConditionUP { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name="use High in VA Condition Down", Order=7, GroupName="0.1_BVA Parameters")]
+        public bool useHighForVAConditionDown { get; set; }
 		
 		// Propriétés Limusine
         [NinjaScriptProperty]
@@ -1304,36 +1311,56 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             get { return downParameters[6].Max; }
             set { downParameters[6].Max = value; }
         }
-		
+		// ############# Cumulative Delta Condition ############### //
 		[NinjaScriptProperty]
-        [Display(Name="Enable Cumulative Delta Condition UP", Order=1, GroupName="4.01_Cumulative_Delta_Parameters")]
-        public bool EnableCumulativeDeltaConditionUP
-        { get; set; }
-
-        [NinjaScriptProperty]
-        [Display(Name="Cumulative Delta Bars Range UP", Order=2, GroupName="4.01_Cumulative_Delta_Parameters")]
-        public int CumulativeDeltaBarsRangeUP
-        { get; set; }
-
-        [NinjaScriptProperty]
-        [Display(Name="Cumulative Delta Jump UP", Order=3, GroupName="4.01_Cumulative_Delta_Parameters")]
-        public int CumulativeDeltaJumpUP
-        { get; set; }
-
-        [NinjaScriptProperty]
-        [Display(Name="Enable Cumulative Delta Condition DOWN", Order=4, GroupName="4.01_Cumulative_Delta_Parameters")]
-        public bool EnableCumulativeDeltaConditionDOWN
-        { get; set; }
-
-        [NinjaScriptProperty]
-        [Display(Name="Cumulative Delta Bars Range DOWN", Order=5, GroupName="4.01_Cumulative_Delta_Parameters")]
-        public int CumulativeDeltaBarsRangeDOWN
-        { get; set; }
-
-        [NinjaScriptProperty]
-        [Display(Name="Cumulative Delta Jump DOWN", Order=6, GroupName="4.01_Cumulative_Delta_Parameters")]
-        public int CumulativeDeltaJumpDOWN
-        { get; set; }
+		[Display(Name="Enable Cumulative Delta Condition UP", Description="Enable the cumulative delta condition for up arrows", Order=1, GroupName="4.01_Cumulative Delta")]
+		public bool EnableCumulativeDeltaConditionUP
+		{
+			get { return enableCumulativeDeltaConditionUP; }
+			set { enableCumulativeDeltaConditionUP = value; }
+		}
+	
+		[NinjaScriptProperty]
+		[Display(Name="Enable Cumulative Delta Condition DOWN", Description="Enable the cumulative delta condition for down arrows", Order=2, GroupName="4.01_Cumulative Delta")]
+		public bool EnableCumulativeDeltaConditionDOWN
+		{
+			get { return enableCumulativeDeltaConditionDOWN; }
+			set { enableCumulativeDeltaConditionDOWN = value; }
+		}
+	
+		[Range(2, 5)]
+		[NinjaScriptProperty]
+		[Display(Name="Cumulative Delta Bars Range UP", Description="Number of bars to check for up arrows (2-5)", Order=3, GroupName="4.01_Cumulative Delta")]
+		public int CumulativeDeltaBarsRangeUP
+		{
+			get { return cumulativeDeltaBarsRangeUP; }
+			set { cumulativeDeltaBarsRangeUP = Math.Max(2, Math.Min(5, value)); }
+		}
+	
+		[Range(2, 5)]
+		[NinjaScriptProperty]
+		[Display(Name="Cumulative Delta Bars Range DOWN", Description="Number of bars to check for down arrows (2-5)", Order=4, GroupName="4.01_Cumulative Delta")]
+		public int CumulativeDeltaBarsRangeDOWN
+		{
+			get { return cumulativeDeltaBarsRangeDOWN; }
+			set { cumulativeDeltaBarsRangeDOWN = Math.Max(2, Math.Min(5, value)); }
+		}
+	
+		[NinjaScriptProperty]
+		[Display(Name="Cumulative Delta Jump UP", Description="Minimum jump in Cumulative Delta for up arrows", Order=5, GroupName="4.01_Cumulative Delta")]
+		public int CumulativeDeltaJumpUP
+		{
+			get { return cumulativeDeltaJumpUP; }
+			set { cumulativeDeltaJumpUP = value; }
+		}
+	
+		[NinjaScriptProperty]
+		[Display(Name="Cumulative Delta Jump DOWN", Description="Minimum jump in Cumulative Delta for down arrows", Order=6, GroupName="4.01_Cumulative Delta")]
+		public int CumulativeDeltaJumpDOWN
+		{
+			get { return cumulativeDeltaJumpDOWN; }
+			set { cumulativeDeltaJumpDOWN = value; }
+		}
 
 		#endregion
 	}
