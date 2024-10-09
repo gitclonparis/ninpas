@@ -1040,7 +1040,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		}
 		
 		[NinjaScriptProperty]
-		[Range(1, 10)]
+		[Range(0, 100)]
 		[Display(Name="POC Ticks Distance", Description="Number of ticks for POC distance from close", Order=2, GroupName="POC Parameters")]
 		public int POCTicksDistance
 		{
