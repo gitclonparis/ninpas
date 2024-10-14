@@ -25,7 +25,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 //This namespace holds Strategies in this folder and is required. Do not change it. 
 namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
-	public class VABV55010 : Strategy
+	public class VABV55015 : Strategy
 	{
 		private double sumPriceVolume;
         private double sumVolume;
@@ -82,13 +82,16 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		
 		private bool breakEvenActivated;
         private double breakEvenPrice;
+		private Order entryOrder = null;
+        private Order stopLossOrder = null;
+        private Order profitTargetOrder = null;
 		
 		protected override void OnStateChange()
 		{
 			if (State == State.SetDefaults)
 			{
 				Description									= @"Strategy OFDeltaProcent avec delta %";
-				Name										= "VABV55010";
+				Name										= "VABV55015";
 				Calculate									= Calculate.OnBarClose;
 				EntriesPerDirection							= 1;
 				EntryHandling								= EntryHandling.AllEntries;
@@ -190,13 +193,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				deltaPercentBarsRangeDOWN = 3;
 				deltaPercentJumpUP = 1.0;
 				deltaPercentJumpDOWN = 1.0;
-				//
-				EnableMaxMinDeltaConditionUP = false;
-				EnableMaxMinDeltaConditionDOWN = false;
-				MinMaxDelta0UP = 100;
-				MaxMinDelta0UP = 50;
-				MaxMinDelta0DOWN = -100;
-				MinMaxDelta0DOWN = 50;
 
                 InitializeVolumetricParameters();
 
@@ -344,7 +340,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				if (showUpArrow)
 				{
 					SetEntryParameters(true);
-					EnterLong(Convert.ToInt32(Qty), @"Long");
+					EnterLong(Convert.ToInt32(Qty), "Entry");
 					
 					Draw.ArrowUp(this, "UpArrow" + CurrentBar, true, 0, Low[0] - 2 * TickSize, UpArrowColor);
 					upperBreakoutCount++;
@@ -370,7 +366,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				else if (showDownArrow)
 				{
 					SetEntryParameters(false);
-					EnterShort(Convert.ToInt32(Qty), @"Short");
+					EnterShort(Convert.ToInt32(Qty), "Entry");
 					Draw.ArrowDown(this, "DownArrow" + CurrentBar, true, 0, High[0] + 2 * TickSize, DownArrowColor);
 					lowerBreakoutCount++;
 	
@@ -395,38 +391,118 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			}
 			
 			// Add Break Even logic
-            if (EnableBreakEven && !breakEvenActivated)
+            if (EnableBreakEven && !breakEvenActivated && Position.MarketPosition != MarketPosition.Flat)
             {
-                foreach (Position position in Positions)
+                if (Position.GetUnrealizedProfitLoss(PerformanceUnit.Ticks, Close[0]) >= BreakEvenTicks)
                 {
-                    if (position.MarketPosition == MarketPosition.Long)
+                    breakEvenPrice = Position.AveragePrice;
+
+                    // Annuler l'ordre de stop loss existant
+                    if (stopLossOrder != null && (stopLossOrder.OrderState == OrderState.Working || stopLossOrder.OrderState == OrderState.Accepted))
+                        CancelOrder(stopLossOrder);
+
+                    // Soumettre un nouvel ordre de stop loss au prix du Break Even
+                    if (Position.MarketPosition == MarketPosition.Long)
                     {
-                        if (position.GetUnrealizedProfitLoss(PerformanceUnit.Ticks) >= BreakEvenTicks)
-                        {
-                            breakEvenPrice = position.AveragePrice;
-                            SetStopLoss(CalculationMode.Price, breakEvenPrice);
-                            breakEvenActivated = true;
-                        }
+                        stopLossOrder = ExitLongStopMarket(0, true, Position.Quantity, breakEvenPrice, "Stop loss", "Entry");
                     }
-                    else if (position.MarketPosition == MarketPosition.Short)
+                    else if (Position.MarketPosition == MarketPosition.Short)
                     {
-                        if (position.GetUnrealizedProfitLoss(PerformanceUnit.Ticks) >= BreakEvenTicks)
-                        {
-                            breakEvenPrice = position.AveragePrice;
-                            SetStopLoss(CalculationMode.Price, breakEvenPrice);
-                            breakEvenActivated = true;
-                        }
+                        stopLossOrder = ExitShortStopMarket(0, true, Position.Quantity, breakEvenPrice, "Stop loss", "Entry");
                     }
+
+                    breakEvenActivated = true;
                 }
             }
 		}
 		
-		protected override void OnExecutionUpdate(Execution execution, string executionId, double price, int quantity, MarketPosition marketPosition, string orderId, DateTime time)
+		protected override void OnOrderUpdate(Order order, double limitPrice, double stopPrice, int quantity,
+            int filled, double averageFillPrice, OrderState orderState, DateTime time, ErrorCode error, string nativeError)
         {
-            // Reset Break Even flag on new trades
+            if (order.Name == "Entry")
+            {
+                if (orderState == OrderState.Filled)
+                    entryOrder = order;
+            }
+            else if (order.Name == "Stop loss")
+            {
+                if (orderState == OrderState.Accepted || orderState == OrderState.Working)
+                    stopLossOrder = order;
+                else if (orderState == OrderState.Cancelled || orderState == OrderState.Filled || orderState == OrderState.Rejected)
+                    stopLossOrder = null;
+            }
+            else if (order.Name == "Profit target")
+            {
+                if (orderState == OrderState.Accepted || orderState == OrderState.Working)
+                    profitTargetOrder = order;
+                else if (orderState == OrderState.Cancelled || orderState == OrderState.Filled || orderState == OrderState.Rejected)
+                    profitTargetOrder = null;
+            }
+        }
+
+        protected override void OnExecutionUpdate(Execution execution, string executionId, double price, int quantity,
+            MarketPosition marketPosition, string orderId, DateTime time)
+        {
             if (execution.Order.OrderState == OrderState.Filled)
             {
-                breakEvenActivated = false;
+                if (execution.Order.Name == "Entry")
+                {
+                    breakEvenActivated = false;
+
+                    double stopPrice = 0;
+                    double targetPrice = 0;
+
+                    if (EnableDynamicStops)
+                    {
+                        // Calculer les distances dynamiques pour le stop loss et le profit target
+                        double vwap = Values[0][0];
+                        double stdDev1Upper = Values[1][0];
+                        double stdDev1Lower = Values[2][0];
+
+                        double ptDistance;
+                        double slDistance;
+
+                        if (Position.MarketPosition == MarketPosition.Long)
+                        {
+                            ptDistance = (stdDev1Upper - vwap) / TickSize;
+                            slDistance = (vwap - stdDev1Lower) / TickSize;
+                            stopPrice = Position.AveragePrice - slDistance * TickSize;
+                            targetPrice = Position.AveragePrice + ptDistance * TickSize;
+                        }
+                        else if (Position.MarketPosition == MarketPosition.Short)
+                        {
+                            ptDistance = (vwap - stdDev1Lower) / TickSize;
+                            slDistance = (stdDev1Upper - vwap) / TickSize;
+                            stopPrice = Position.AveragePrice + slDistance * TickSize;
+                            targetPrice = Position.AveragePrice - ptDistance * TickSize;
+                        }
+                    }
+                    else
+                    {
+                        if (Position.MarketPosition == MarketPosition.Long)
+                        {
+                            stopPrice = Position.AveragePrice - Sl * TickSize;
+                            targetPrice = Position.AveragePrice + Pt * TickSize;
+                        }
+                        else if (Position.MarketPosition == MarketPosition.Short)
+                        {
+                            stopPrice = Position.AveragePrice + Sl * TickSize;
+                            targetPrice = Position.AveragePrice - Pt * TickSize;
+                        }
+                    }
+
+                    // Soumettre les ordres initiaux de stop loss et profit target
+                    if (Position.MarketPosition == MarketPosition.Long)
+                    {
+                        stopLossOrder = ExitLongStopMarket(0, true, Position.Quantity, stopPrice, "Stop loss", "Entry");
+                        profitTargetOrder = ExitLongLimit(0, true, Position.Quantity, targetPrice, "Profit target", "Entry");
+                    }
+                    else if (Position.MarketPosition == MarketPosition.Short)
+                    {
+                        stopLossOrder = ExitShortStopMarket(0, true, Position.Quantity, stopPrice, "Stop loss", "Entry");
+                        profitTargetOrder = ExitShortLimit(0, true, Position.Quantity, targetPrice, "Profit target", "Entry");
+                    }
+                }
             }
         }
 		
@@ -557,36 +633,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			return true;
 		}
 		
-		private bool CheckMaxMinDeltaConditionUP()
-		{
-			if (!EnableMaxMinDeltaConditionUP)
-				return true;
-		
-			NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType = Bars.BarsSeries.BarsType as NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType;
-			if (barsType == null)
-				return true;
-		
-			double maxDelta0 = barsType.Volumes[CurrentBar].GetMaximumPositiveDelta();
-			double minDelta0 = barsType.Volumes[CurrentBar].GetMaximumNegativeDelta();
-		
-			return (maxDelta0 > MinMaxDelta0UP && minDelta0 < MaxMinDelta0UP);
-		}
-		
-		private bool CheckMaxMinDeltaConditionDOWN()
-		{
-			if (!EnableMaxMinDeltaConditionDOWN)
-				return true;
-		
-			NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType = Bars.BarsSeries.BarsType as NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType;
-			if (barsType == null)
-				return true;
-		
-			double maxDelta0 = barsType.Volumes[CurrentBar].GetMaximumPositiveDelta();
-			double minDelta0 = barsType.Volumes[CurrentBar].GetMaximumNegativeDelta();
-		
-			return (minDelta0 < MaxMinDelta0DOWN && maxDelta0 < MinMaxDelta0DOWN);
-		}
-		
 		// ########################################################################
 		private bool ShouldDrawUpArrow()
         {
@@ -631,8 +677,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			bool cumulativeDeltaCondition = CheckCumulativeDeltaConditionUP();
 			bool barDeltaCondition = CheckBarDeltaConditionUP();
 			bool deltaPercentCondition = CheckDeltaPercentConditionUP();
-			bool maxMinDeltaCondition = CheckMaxMinDeltaConditionUP();
-			return bvaCondition && limusineCondition && std3Condition && cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition && maxMinDeltaCondition;
+			return bvaCondition && limusineCondition && std3Condition && cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition;
         }
 		
 		private bool ShouldDrawDownArrow()
@@ -678,8 +723,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			bool cumulativeDeltaCondition = CheckCumulativeDeltaConditionDOWN();
 			bool barDeltaCondition = CheckBarDeltaConditionDOWN();
 			bool deltaPercentCondition = CheckDeltaPercentConditionDOWN();
-			bool maxMinDeltaCondition = CheckMaxMinDeltaConditionDOWN();
-			return bvaCondition && limusineCondition && std3Condition && cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition && maxMinDeltaCondition;
+			return bvaCondition && limusineCondition && std3Condition && cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition;
         }
 		
 		private bool CheckVolumetricConditions(bool isUpDirection)
@@ -1706,30 +1750,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			get { return deltaPercentJumpDOWN; }
 			set { deltaPercentJumpDOWN = value; }
 		}
-		
-		[NinjaScriptProperty]
-		[Display(Name="Enable Max/Min Delta Condition UP", Description="Enable the Max/Min Delta condition for up arrows", Order=1, GroupName="4.04_Max/Min Delta")]
-		public bool EnableMaxMinDeltaConditionUP { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Enable Max/Min Delta Condition DOWN", Description="Enable the Max/Min Delta condition for down arrows", Order=2, GroupName="4.04_Max/Min Delta")]
-		public bool EnableMaxMinDeltaConditionDOWN { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Minimum MaxDelta0 for UP", Description="Minimum value for MaxDelta0 for up arrows", Order=3, GroupName="4.04_Max/Min Delta")]
-		public double MinMaxDelta0UP { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Maximum MinDelta0 for UP", Description="Maximum value for MinDelta0 for up arrows", Order=4, GroupName="4.04_Max/Min Delta")]
-		public double MaxMinDelta0UP { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Maximum MinDelta0 for DOWN", Description="Maximum (negative) value for MinDelta0 for down arrows", Order=5, GroupName="4.04_Max/Min Delta")]
-		public double MaxMinDelta0DOWN { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Minimum MaxDelta0 for DOWN", Description="Minimum value for MaxDelta0 for down arrows", Order=6, GroupName="4.04_Max/Min Delta")]
-		public double MinMaxDelta0DOWN { get; set; }
 
 		#endregion
 	}
