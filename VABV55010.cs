@@ -194,7 +194,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				EnableMaxMinDeltaConditionUP = false;
 				EnableMaxMinDeltaConditionDOWN = false;
 				MinMaxDelta0UP = 100;
-				MaxMinDelta0UP = 50;
+				MaxMinDelta0UP = -50;
 				MaxMinDelta0DOWN = -100;
 				MinMaxDelta0DOWN = 50;
 
@@ -569,7 +569,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			double maxDelta0 = barsType.Volumes[CurrentBar].GetMaximumPositiveDelta();
 			double minDelta0 = barsType.Volumes[CurrentBar].GetMaximumNegativeDelta();
 		
-			return (maxDelta0 > MinMaxDelta0UP && minDelta0 < MaxMinDelta0UP);
+			return (maxDelta0 > MinMaxDelta0UP && minDelta0 > MaxMinDelta0UP);
 		}
 		
 		private bool CheckMaxMinDeltaConditionDOWN()
