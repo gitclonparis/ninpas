@@ -25,7 +25,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 //This namespace holds Strategies in this folder and is required. Do not change it. 
 namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
-	public class VABV55010 : Strategy
+	public class VABV55050StopSuiveur : Strategy
 	{
 		private double sumPriceVolume;
         private double sumVolume;
@@ -94,7 +94,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			if (State == State.SetDefaults)
 			{
 				Description									= @"Strategy OFDeltaProcent avec delta %";
-				Name										= "VABV55010";
+				Name										= "VABV55050StopSuiveur";
 				Calculate									= Calculate.OnBarClose;
 				EntriesPerDirection							= 1;
 				EntryHandling								= EntryHandling.AllEntries;
@@ -125,6 +125,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 BreakEvenTicks = 5;
 				UsePOCBasedStopLoss = false;
 				POCStopLossOffset = 5;
+				UseTrailingStopWithBarSize = false;
 				// Paramètres VAB
                 ResetPeriod = 120;
                 MinBarsForSignal = 10;
@@ -205,8 +206,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				MinMaxDelta0DOWN = 50;
 				// Initial Balance
 				EnableIBLogic = false;
-				IBStartTime = DateTime.Parse("15:30", System.Globalization.CultureInfo.InvariantCulture);
-				IBEndTime = DateTime.Parse("16:00", System.Globalization.CultureInfo.InvariantCulture);
+				IBStartTime = DateTime.Parse("09:30", System.Globalization.CultureInfo.InvariantCulture);
+				IBEndTime = DateTime.Parse("10:30", System.Globalization.CultureInfo.InvariantCulture);
 				IBOffsetTicks = 0;
 
                 InitializeVolumetricParameters();
@@ -783,6 +784,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             SetStopLoss(CalculationMode.Ticks, slDistance);
             SetProfitTarget(CalculationMode.Ticks, ptDistance);
         }
+		// #######
 		
 		private void SetEntryParameters(bool isLong)
 		{
@@ -793,7 +795,14 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			}
 			else if (UseBarSizeForStops)
 			{
-				SetStopsBasedOnBarSize(isLong);
+				if (UseTrailingStopWithBarSize)
+				{
+					SetTrailingStopBasedOnBarSize(isLong);
+				}
+				else
+				{
+					SetStopsBasedOnBarSize(isLong);
+				}
 			}
 			else if (EnableDynamicStops)
 			{
@@ -810,6 +819,22 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				SetProfitTarget(CalculationMode.Ticks, Pt);
 			}
 		}
+		
+		// Création de la méthode SetTrailingStopBasedOnBarSize
+		private void SetTrailingStopBasedOnBarSize(bool isLong)
+		{
+			// Calculer la taille de la barre actuelle en ticks
+			double barSizeTicks = (High[0] - Low[0]) / TickSize;
+			barSizeTicks = Math.Max(1, Math.Round(Math.Abs(barSizeTicks)));
+		
+			// Définir le trailing stop basé sur la taille de la barre
+			SetTrailStop(CalculationMode.Ticks, barSizeTicks);
+		
+			// Optionnellement, définir le profit target
+			SetProfitTarget(CalculationMode.Ticks, Pt); // Vous pouvez aussi utiliser barSizeTicks si vous le souhaitez
+		}
+		
+		//#############
 		
 		private void SetPOCBasedStopLoss(bool isLong)
 		{
@@ -978,6 +1003,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Range(1, int.MaxValue)]
 		[Display(Name="POC Stop Loss Offset", Description="Number of ticks to add to POC for Stop Loss", Order=10, GroupName="0.02_Entry_Parameters")]
 		public int POCStopLossOffset { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Use Trailing Stop with Bar Size", Order = 11, GroupName = "0.02_Entry_Parameters")]
+		public bool UseTrailingStopWithBarSize { get; set; }
 		
 		// ###################################################### //
 		
