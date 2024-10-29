@@ -25,7 +25,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 //This namespace holds Strategies in this folder and is required. Do not change it. 
 namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
-	public class VABV55060 : Strategy
+	public class VABV55080 : Strategy
 	{
 		private double sumPriceVolume;
         private double sumVolume;
@@ -100,7 +100,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			if (State == State.SetDefaults)
 			{
 				Description									= @"Strategy OFDeltaProcent avec delta %";
-				Name										= "VABV55060";
+				Name										= "VABV55080";
 				Calculate									= Calculate.OnBarClose;
 				EntriesPerDirection							= 1;
 				EntryHandling								= EntryHandling.AllEntries;
@@ -807,12 +807,14 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                    (!OKisATR || (ATR1[0] > FminATR && ATR1[0] < FmaxATR)) &&
                    (!OKisVOL || (VOL1[0] > VOLMA1[0])) &&
                    (!OKisAfterBarsSinceResetUP || withinSignalTime) &&
-                   (!OKisAboveUpperThreshold || Close[0] > (Values[1][0] + MinEntryDistanceUP * TickSize)) &&
-                   (!OKisWithinMaxEntryDistance || Close[0] <= (Values[1][0] + MaxEntryDistanceUP * TickSize)) &&
-                   (!OKisUpperBreakoutCountExceeded || upperBreakoutCount < MaxUpperBreakouts) &&
-                   (!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP)) &&
-				   (!useOpenForVAConditionUP || (Open[0] > Values[2][0] && Open[0] < Values[1][0])) &&
-				   (!useLowForVAConditionUP || (Low[0] > Values[2][0] && Low[0] < Values[1][0]));
+                   // Modification ici : Values[3][0] représente STD2 Upper au lieu de Values[1][0]
+				   (!OKisAboveUpperThreshold || Close[0] > (Values[3][0] + MinEntryDistanceUP * TickSize)) &&
+				   (!OKisWithinMaxEntryDistance || Close[0] <= (Values[3][0] + MaxEntryDistanceUP * TickSize)) &&
+				   (!OKisUpperBreakoutCountExceeded || upperBreakoutCount < MaxUpperBreakouts) &&
+				   (!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP)) &&
+				   // Modification ici : utilisation de Values[4][0] pour STD2 Lower
+				   (!useOpenForVAConditionUP || (Open[0] > Values[4][0] && Open[0] < Values[3][0])) &&
+				   (!useLowForVAConditionUP || (Low[0] > Values[4][0] && Low[0] < Values[3][0]));
 
             double openCloseDiff = Math.Abs(Open[0] - Close[0]) / TickSize;
             double highLowDiff = Math.Abs(High[0] - Low[0]) / TickSize;
@@ -870,12 +872,14 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                    (!OKisATR || (ATR1[0] > FminATR && ATR1[0] < FmaxATR)) &&
                    (!OKisVOL || (VOL1[0] > VOLMA1[0])) &&
                    (!OKisAfterBarsSinceResetDown || withinSignalTime) &&
-                   (!OKisBelovLowerThreshold || Close[0] < (Values[2][0] - MinEntryDistanceDOWN * TickSize)) &&
-                   (!OKisWithinMaxEntryDistanceDown || Close[0] >= (Values[2][0] - MaxEntryDistanceDOWN * TickSize)) &&
-                   (!OKisLowerBreakoutCountExceeded || lowerBreakoutCount < MaxLowerBreakouts) &&
-                   (!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP)) &&
-				   (!useOpenForVAConditionDown || (Open[0] > Values[2][0] && Open[0] < Values[1][0])) &&
-				   (!useHighForVAConditionDown || (High[0] > Values[2][0] && High[0] < Values[1][0]));
+                   // Modification ici : Values[4][0] représente STD2 Lower au lieu de Values[2][0]
+				   (!OKisBelovLowerThreshold || Close[0] < (Values[4][0] - MinEntryDistanceDOWN * TickSize)) &&
+				   (!OKisWithinMaxEntryDistanceDown || Close[0] >= (Values[4][0] - MaxEntryDistanceDOWN * TickSize)) &&
+				   (!OKisLowerBreakoutCountExceeded || lowerBreakoutCount < MaxLowerBreakouts) &&
+				   (!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP)) &&
+				   // Modification ici : utilisation de Values[3][0] et Values[4][0] pour STD2
+				   (!useOpenForVAConditionDown || (Open[0] > Values[4][0] && Open[0] < Values[3][0])) &&
+				   (!useHighForVAConditionDown || (High[0] > Values[4][0] && High[0] < Values[3][0]));
 
             double openCloseDiff = Math.Abs(Open[0] - Close[0]) / TickSize;
             double highLowDiff = Math.Abs(High[0] - Low[0]) / TickSize;
@@ -2189,6 +2193,14 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
         [Browsable(false)]
         [XmlIgnore]
         public Series<double> StdDev1Lower => Values[2];
+		
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> StdDev2Upper => Values[3];
+		
+		[Browsable(false)]
+		[XmlIgnore]
+		public Series<double> StdDev2Lower => Values[4];
 		
 		#endregion
 	}
