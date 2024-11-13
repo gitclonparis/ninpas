@@ -39,6 +39,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
         private ATR ATR1;
         private VOL VOL1;
         private VOLMA VOLMA1;
+		private OrderFlowCumulativeDelta cumulativeDelta; // Cumulative Delta variable
         
         private double highestSTD3Upper;
         private double lowestSTD3Lower;
@@ -190,6 +191,11 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				useOpenForVAConditionDown = false;
 				useLowForVAConditionUP = false;
 				useHighForVAConditionDown = false;
+				// Initialize the new cumulative delta properties
+                EnableUPlimDeltaSession = false;
+                EnableDownLimDeltaSession = false;
+                MinVdeltaCsession = 200;
+                MaxVdeltaCsession = 10000;
 				// Nouveaux paramètres pour la condition CumulativeDelta
 				enableCumulativeDeltaConditionUP = false;
 				enableCumulativeDeltaConditionDOWN = false;
@@ -258,6 +264,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			else if (State == State.Configure)
 			{
 				ResetValues(DateTime.MinValue);
+				AddDataSeries(Data.BarsPeriodType.Tick, 1);
 			}
 			else if (State == State.DataLoaded)
             {
@@ -267,6 +274,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 VOLMA1 = VOLMA(Close, Convert.ToInt32(FperiodVol));
 				pocSeries = new Series<double>(this);
 				sessionIterator = new SessionIterator(Bars);
+				cumulativeDelta = OrderFlowCumulativeDelta(CumulativeDeltaType.BidAsk, CumulativeDeltaPeriod.Session, 0);
             }
 		}
 		private void InitializeVolumetricParameters()
@@ -308,6 +316,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
 		protected override void OnBarUpdate()
 		{
+			if (BarsInProgress == 1)
+            {
+                // Update cumulative delta on tick data series
+                cumulativeDelta.Update(cumulativeDelta.BarsArray[1].Count - 1, 1);
+                return;
+            }
 			if (BarsInProgress != 0) 
 				return;
 			
@@ -833,6 +847,17 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 if (slopePerBar < MinSlopeValueUP)
                     return false; // The slope is not steep enough upwards
             }
+			// Nouvelle logique modifiée pour le delta cumulatif UP
+            bool cumulativeDeltaSessionCondition = true;
+            if (EnableUPlimDeltaSession)
+            {
+                double deltaDifference = Math.Abs(cumulativeDelta.DeltaClose[0] - cumulativeDelta.DeltaOpen[0]);
+                // Si le delta final est plus grand que le delta initial, c'est un mouvement haussier
+                bool isUpwardMovement = cumulativeDelta.DeltaClose[0] > cumulativeDelta.DeltaOpen[0];
+                cumulativeDeltaSessionCondition = deltaDifference >= MinVdeltaCsession && 
+                                                deltaDifference <= MaxVdeltaCsession &&
+                                                isUpwardMovement;
+            }
 
             // New condition for STD3 Upper at its highest
             bool std3Condition = !EnableSTD3HighLowTracking || Values[5][0] >= highestSTD3Upper;
@@ -846,7 +871,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			bool rangeBreakoutCondition = !EnablePreviousSessionRangeBreakout || (previousSessionHighStd1Upper != double.MinValue && Close[0] > previousSessionHighStd1Upper);
 			bool std3DistanceCondition = CheckSTD3DistanceCondition(true);
 			bool pocVolumeCondition = CheckPOCVolumeCondition(true);
-			return bvaCondition && limusineCondition && std3Condition && cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition && maxMinDeltaCondition && maxVolumeCondition && maxVolumeRangeCondition && pocCondition && rangeBreakoutCondition && std3DistanceCondition && pocVolumeCondition;
+			return bvaCondition && limusineCondition && std3Condition && cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition && maxMinDeltaCondition && maxVolumeCondition && maxVolumeRangeCondition && pocCondition && rangeBreakoutCondition && std3DistanceCondition && pocVolumeCondition && cumulativeDeltaSessionCondition;
         }
 		
 		private bool ShouldDrawDownArrow()
@@ -896,6 +921,17 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 if (slopePerBar > -MinSlopeValueDOWN)
                     return false; // The slope is not steep enough downwards
             }
+			// Nouvelle logique modifiée pour le delta cumulatif DOWN
+            bool cumulativeDeltaSessionCondition = true;
+            if (EnableDownLimDeltaSession)
+            {
+                double deltaDifference = Math.Abs(cumulativeDelta.DeltaClose[0] - cumulativeDelta.DeltaOpen[0]);
+                // Si le delta final est plus petit que le delta initial, c'est un mouvement baissier
+                bool isDownwardMovement = cumulativeDelta.DeltaClose[0] < cumulativeDelta.DeltaOpen[0];
+                cumulativeDeltaSessionCondition = deltaDifference >= MinVdeltaCsession && 
+                                                deltaDifference <= MaxVdeltaCsession &&
+                                                isDownwardMovement;
+            }
 
             // New condition for STD3 Lower at its lowest
             bool std3Condition = !EnableSTD3HighLowTracking || Values[6][0] <= lowestSTD3Lower;
@@ -909,7 +945,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			bool rangeBreakoutCondition = !EnablePreviousSessionRangeBreakout || (previousSessionLowStd1Lower != double.MaxValue && Close[0] < previousSessionLowStd1Lower);
 			bool std3DistanceCondition = CheckSTD3DistanceCondition(false);
 			bool pocVolumeCondition = CheckPOCVolumeCondition(false);
-			return bvaCondition && limusineCondition && std3Condition && cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition && maxMinDeltaCondition && maxVolumeCondition && maxVolumeRangeCondition && pocCondition && rangeBreakoutCondition && std3DistanceCondition && pocVolumeCondition;
+			return bvaCondition && limusineCondition && std3Condition && cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition && maxMinDeltaCondition && maxVolumeCondition && maxVolumeRangeCondition && pocCondition && rangeBreakoutCondition && std3DistanceCondition && pocVolumeCondition && cumulativeDeltaSessionCondition;
         }
 		
 		private void ResetSessionValues()
@@ -1413,6 +1449,25 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[NinjaScriptProperty]
 		[Display(Name = "Maximum Distance From VWAP (Ticks)", Order = 3, GroupName = "0.7_Distance_VWAP")]
 		public int MaxDistanceFromVWAP { get; set; }
+		
+		// New cumulative delta session properties under group 0.8_Limusine CdeltaSession
+        [NinjaScriptProperty]
+        [Display(Name = "Enable UP Limusine Delta Session", Description = "Enable cumulative delta session condition for UP signals", Order = 1, GroupName = "0.8_Limusine CdeltaSession")]
+        public bool EnableUPlimDeltaSession { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Enable DOWN Limusine Delta Session", Description = "Enable cumulative delta session condition for DOWN signals", Order = 2, GroupName = "0.8_Limusine CdeltaSession")]
+        public bool EnableDownLimDeltaSession { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, int.MaxValue)]
+        [Display(Name = "Min Vdelta Csession", Description = "Minimum cumulative delta session value", Order = 3, GroupName = "0.8_Limusine CdeltaSession")]
+        public int MinVdeltaCsession { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(0, int.MaxValue)]
+        [Display(Name = "Max Vdelta Csession", Description = "Maximum cumulative delta session value", Order = 4, GroupName = "0.8_Limusine CdeltaSession")]
+        public int MaxVdeltaCsession { get; set; }
 		
 		[NinjaScriptProperty]
         [Display(Name="Enable STD3 High/Low Tracking", Description="Track highest STD3 Upper and lowest STD3 Lower since last reset", Order=1000, GroupName="1.01_STD3 Tracking")]
