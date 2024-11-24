@@ -25,7 +25,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 //This namespace holds Strategies in this folder and is required. Do not change it. 
 namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
-	public class VABV77000 : Strategy
+	public class VABV99000 : Strategy
 	{
 		private double sumPriceVolume;
         private double sumVolume;
@@ -112,7 +112,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			if (State == State.SetDefaults)
 			{
 				Description									= @"Strategy OFDeltaProcent avec delta %";
-				Name										= "VABV77000";
+				Name										= "VABV99000";
 				Calculate									= Calculate.OnBarClose;
 				EntriesPerDirection							= 1;
 				EntryHandling								= EntryHandling.AllEntries;
@@ -171,6 +171,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 ShowLimusineOpenCloseDOWN = true;
                 ShowLimusineHighLowUP = true;
                 ShowLimusineHighLowDOWN = true;
+				UseLimMoyenne = false;
+				LimMoyenneMultiplier = 1.5;
+				LimMoyenneRange = 15;
+				LimMoyenneUseHighLow = true;
 
                 // Nouveaux paramètres
                 EnableSlopeFilterUP = false;
@@ -245,6 +249,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				//
 				EnablePOCConditionUP = false;
 				EnablePOCConditionDOWN = false;
+                POCBarsLookBackUP = 2;
+                POCBarsLookBackDOWN = 2;
 				//
 				EnableSTD3DistanceConditionUP = false;
 				EnableSTD3DistanceConditionDOWN = false;
@@ -266,6 +272,32 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				VABreakoutBarsRangeUP = 5;
 				VABreakoutBarsRangeDOWN = 5;
 				VABreakoutOffsetTicks = 2;
+				//
+				EnableVABreakoutReversalUP2 = false;
+				EnableVABreakoutReversalDOWN2 = false;
+				VABreakoutBarsRangeUP2 = 5;
+				VABreakoutBarsRangeDOWN2 = 5;
+				VABreakoutOffsetTicks2 = 2;
+				//
+				EnableVABreakoutReversalUP3 = false;
+				EnableVABreakoutReversalDOWN3 = false;
+				VABreakoutBarsRangeUP3 = 5;
+				VABreakoutBarsRangeDOWN3 = 5;
+				VABreakoutOffsetTicks3 = 2;
+				//
+				EnableVABreakoutReversalUP4 = false;
+				EnableVABreakoutReversalDOWN4 = false;
+				VABreakoutBarsRangeUP4 = 5;
+				VABreakoutBarsRangeDOWN4 = 5;
+				VABreakoutOffsetTicks4 = 2;
+				//
+				EnableVABreakoutReversalUP5 = false;
+				EnableVABreakoutReversalDOWN5 = false;
+				VABreakoutBarsRangeUP5 = 5;
+				VABreakoutBarsRangeDOWN5 = 5;
+				VABreakoutOffsetTicks5 = 2;
+				UsePreviousBarUP5 = false;
+				UsePreviousBarDOWN5 = false;
 				//
 				EnableSellersForBuy = false;
 				EnableBuyersForSell = false;
@@ -766,29 +798,40 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		}
 		
 		private bool CheckPOCCondition(bool isUp)
-		{
-			if (!(Bars.BarsSeries.BarsType is NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType))
-				return true;
-		
-			if ((isUp && !EnablePOCConditionUP) || (!isUp && !EnablePOCConditionDOWN))
-				return true;
-		
-			if (CurrentBar < 1)
-				return true;
-		
-			double currentPOCPrice, previousPOCPrice;
-			barsType.Volumes[CurrentBar].GetMaximumVolume(null, out currentPOCPrice);
-			barsType.Volumes[CurrentBar - 1].GetMaximumVolume(null, out previousPOCPrice);
-		
-			if (isUp)
-			{
-				return currentPOCPrice > previousPOCPrice;
-			}
-			else
-			{
-				return currentPOCPrice < previousPOCPrice;
-			}
-		}
+        {
+            if (!(Bars.BarsSeries.BarsType is NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType))
+                return true;
+
+            if ((isUp && !EnablePOCConditionUP) || (!isUp && !EnablePOCConditionDOWN))
+                return true;
+
+            int barsLookBack = isUp ? POCBarsLookBackUP : POCBarsLookBackDOWN;
+            if (CurrentBar < barsLookBack)
+                return true;
+
+            double currentPOCPrice;
+            barsType.Volumes[CurrentBar].GetMaximumVolume(null, out currentPOCPrice);
+
+            // Vérifier que le POC actuel est plus haut/bas que tous les POCs précédents
+            for (int i = 1; i <= barsLookBack; i++)
+            {
+                double previousPOCPrice;
+                barsType.Volumes[CurrentBar - i].GetMaximumVolume(null, out previousPOCPrice);
+
+                if (isUp)
+                {
+                    if (currentPOCPrice <= previousPOCPrice)
+                        return false;
+                }
+                else
+                {
+                    if (currentPOCPrice >= previousPOCPrice)
+                        return false;
+                }
+            }
+
+            return true;
+        }
 		
 		private bool CheckSTD3DistanceCondition(bool isUp)
 		{
@@ -867,6 +910,84 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		
 			return opensBelowVA && highEntersVA && closesBelowVA;
 		}
+
+		private bool CheckVABreakoutReversalUP2()
+		{
+			if (!EnableVABreakoutReversalUP2 || CurrentBar < VABreakoutBarsRangeUP2)
+				return true;
+
+			double tickOffset = VABreakoutOffsetTicks2 * TickSize;
+			double std1Upper = Values[1][0]; // StdDev1Upper actuel
+
+			// Vérifier qu'au moins une barre dans le range a dépassé std1Upper + offset
+			bool hasExceededVA = false;
+			for (int i = 1; i <= VABreakoutBarsRangeUP2; i++)
+			{
+				if (Math.Max(High[i], Low[i]) > Values[1][i] + tickOffset)
+				{
+					hasExceededVA = true;
+					break;
+				}
+			}
+
+			if (!hasExceededVA)
+				return false;
+
+			// Vérifier qu'au moins une barre dans le range entre dans la VA
+			bool hasEnteredVA = false;
+			for (int i = 0; i <= VABreakoutBarsRangeUP2; i++)
+			{
+				if (Math.Min(High[i], Low[i]) <= std1Upper)
+				{
+					hasEnteredVA = true;
+					break;
+				}
+			}
+
+			// Vérifier que le prix actuel est au-dessus de la VA
+			bool isAboveVA = Close[0] > std1Upper;
+
+			return hasExceededVA && hasEnteredVA && isAboveVA;
+		}
+
+		private bool CheckVABreakoutReversalDOWN2()
+		{
+			if (!EnableVABreakoutReversalDOWN2 || CurrentBar < VABreakoutBarsRangeDOWN2)
+				return true;
+
+			double tickOffset = VABreakoutOffsetTicks2 * TickSize;
+			double std1Lower = Values[2][0]; // StdDev1Lower actuel
+
+			// Vérifier qu'au moins une barre dans le range a dépassé std1Lower - offset
+			bool hasExceededVA = false;
+			for (int i = 1; i <= VABreakoutBarsRangeDOWN2; i++)
+			{
+				if (Math.Min(High[i], Low[i]) < Values[2][i] - tickOffset)
+				{
+					hasExceededVA = true;
+					break;
+				}
+			}
+
+			if (!hasExceededVA)
+				return false;
+
+			// Vérifier qu'au moins une barre dans le range entre dans la VA
+			bool hasEnteredVA = false;
+			for (int i = 0; i <= VABreakoutBarsRangeDOWN2; i++)
+			{
+				if (Math.Max(High[i], Low[i]) >= std1Lower)
+				{
+					hasEnteredVA = true;
+					break;
+				}
+			}
+
+			// Vérifier que le prix actuel est en-dessous de la VA
+			bool isBelowVA = Close[0] < std1Lower;
+
+			return hasExceededVA && hasEnteredVA && isBelowVA;
+		}
 		
 		//
 		private bool CheckSellersForBuyCondition()
@@ -903,6 +1024,176 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			return Math.Abs(difference) > Math.Abs(BuyersDifferenceThreshold);
 		}
 		
+		//
+		private bool CheckVABreakoutReversalUP3()
+		{
+			if (!EnableVABreakoutReversalUP3 || CurrentBar < VABreakoutBarsRangeUP3)
+				return true;
+		
+			double tickOffset = VABreakoutOffsetTicks3 * TickSize;
+			double std1Upper = Values[1][0]; // StdDev1Upper actuel
+		
+			// Vérifier qu'au moins une barre dans le range a dépassé std1Upper + offset
+			bool hasExceededVA = false;
+			for (int i = 1; i <= VABreakoutBarsRangeUP3; i++)
+			{
+				if (Math.Max(High[i], Low[i]) > Values[1][i] + tickOffset)
+				{
+					hasExceededVA = true;
+					break;
+				}
+			}
+		
+			if (!hasExceededVA)
+				return false;
+		
+			// Vérifier qu'au moins une barre dans le range entre dans la VA
+			bool hasEnteredVA = false;
+			for (int i = 0; i <= VABreakoutBarsRangeUP3; i++)
+			{
+				if (Math.Min(High[i], Low[i]) <= std1Upper)
+				{
+					hasEnteredVA = true;
+					break;
+				}
+			}
+		
+			// Vérifier que le prix actuel est au-dessus de la VA
+			bool isAboveVA = Close[0] > std1Upper;
+		
+			return hasExceededVA && hasEnteredVA && isAboveVA;
+		}
+		
+		private bool CheckVABreakoutReversalDOWN3()
+		{
+			if (!EnableVABreakoutReversalDOWN3 || CurrentBar < VABreakoutBarsRangeDOWN3)
+				return true;
+		
+			double tickOffset = VABreakoutOffsetTicks3 * TickSize;
+			double std1Lower = Values[2][0]; // StdDev1Lower actuel
+		
+			// Vérifier qu'au moins une barre dans le range a dépassé std1Lower - offset
+			bool hasExceededVA = false;
+			for (int i = 1; i <= VABreakoutBarsRangeDOWN3; i++)
+			{
+				if (Math.Min(High[i], Low[i]) < Values[2][i] - tickOffset)
+				{
+					hasExceededVA = true;
+					break;
+				}
+			}
+		
+			if (!hasExceededVA)
+				return false;
+		
+			// Vérifier qu'au moins une barre dans le range entre dans la VA
+			bool hasEnteredVA = false;
+			for (int i = 0; i <= VABreakoutBarsRangeDOWN3; i++)
+			{
+				if (Math.Max(High[i], Low[i]) >= std1Lower)
+				{
+					hasEnteredVA = true;
+					break;
+				}
+			}
+		
+			// Vérifier que le prix actuel est en-dessous de la VA
+			bool isBelowVA = Close[0] < std1Lower;
+		
+			return hasExceededVA && hasEnteredVA && isBelowVA;
+		}
+		
+		//
+		private bool CheckVABreakoutReversalUP4()
+		{
+			if (!EnableVABreakoutReversalUP4 || CurrentBar < VABreakoutBarsRangeUP4)
+				return true;
+		
+			double tickOffset = VABreakoutOffsetTicks4 * TickSize;
+			double std1Upper = Values[1][0]; // StdDev1Upper actuel
+		
+			// Vérifier que les barres précédentes ont clôturé au-dessus de std1Upper + offset
+			for (int i = 1; i <= VABreakoutBarsRangeUP4; i++)
+			{
+				if (Close[i] <= Values[1][i] + tickOffset)
+					return false;
+			}
+		
+			// Vérifier les conditions pour la barre actuelle
+			bool lowEntersVA = Low[0] <= std1Upper;
+			bool closesAboveVA = Close[0] > std1Upper;
+		
+			return lowEntersVA && closesAboveVA;
+		}
+		
+		private bool CheckVABreakoutReversalDOWN4()
+		{
+			if (!EnableVABreakoutReversalDOWN4 || CurrentBar < VABreakoutBarsRangeDOWN4)
+				return true;
+		
+			double tickOffset = VABreakoutOffsetTicks4 * TickSize;
+			double std1Lower = Values[2][0]; // StdDev1Lower actuel
+		
+			// Vérifier que les barres précédentes ont clôturé en-dessous de std1Lower - offset
+			for (int i = 1; i <= VABreakoutBarsRangeDOWN4; i++)
+			{
+				if (Close[i] >= Values[2][i] - tickOffset)
+					return false;
+			}
+		
+			// Vérifier les conditions pour la barre actuelle
+			bool highEntersVA = High[0] >= std1Lower;
+			bool closesBelowVA = Close[0] < std1Lower;
+		
+			return highEntersVA && closesBelowVA;
+		}
+		
+		// Méthodes de vérification pour VA Breakout Reversal 5
+		private bool CheckVABreakoutReversalUP5()
+		{
+			if (!EnableVABreakoutReversalUP5 || CurrentBar < VABreakoutBarsRangeUP5)
+				return true;
+		
+			double tickOffset = VABreakoutOffsetTicks5 * TickSize;
+			double std1Upper = Values[1][0]; // StdDev1Upper actuel
+		
+			// Vérifier que les barres précédentes ont clôturé au-dessus de std1Upper + offset
+			for (int i = 1; i <= VABreakoutBarsRangeUP5; i++)
+			{
+				if (Close[i] <= Values[1][i] + tickOffset)
+					return false;
+			}
+		
+			// Vérifier les conditions pour la barre actuelle
+			bool lowEntersVA = UsePreviousBarUP5 ? Low[1] <= std1Upper : Low[0] <= std1Upper;
+			bool closesAboveVA = Close[0] > std1Upper;
+		
+			return lowEntersVA && closesAboveVA;
+		}
+		
+		private bool CheckVABreakoutReversalDOWN5()
+		{
+			if (!EnableVABreakoutReversalDOWN5 || CurrentBar < VABreakoutBarsRangeDOWN5)
+				return true;
+		
+			double tickOffset = VABreakoutOffsetTicks5 * TickSize;
+			double std1Lower = Values[2][0]; // StdDev1Lower actuel
+		
+			// Vérifier que les barres précédentes ont clôturé en-dessous de std1Lower - offset
+			for (int i = 1; i <= VABreakoutBarsRangeDOWN5; i++)
+			{
+				if (Close[i] >= Values[2][i] - tickOffset)
+					return false;
+			}
+		
+			// Vérifier les conditions pour la barre actuelle
+			bool highEntersVA = UsePreviousBarDOWN5 ? High[1] >= std1Lower : High[0] >= std1Lower;
+			bool closesBelowVA = Close[0] < std1Lower;
+		
+			return highEntersVA && closesBelowVA;
+		}
+
+
 		// ########################################################################
 		private bool ShouldDrawUpArrow()
         {
@@ -937,7 +1228,32 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             bool limusineCondition = (ShowLimusineOpenCloseUP && openCloseDiff >= MinimumTicks && openCloseDiff <= MaximumTicks && Close[0] > Open[0]) ||
                                     (ShowLimusineHighLowUP && highLowDiff >= MinimumTicks && highLowDiff <= MaximumTicks && Close[0] > Open[0]);
 									
-            // New Slope Condition for UP Arrows
+            //
+			bool limMoyenneCondition = true;
+			if (UseLimMoyenne && CurrentBar >= LimMoyenneRange)
+			{
+				double avgBarSize = 0;
+				for (int i = 1; i <= LimMoyenneRange; i++)
+				{
+					if (LimMoyenneUseHighLow)
+						avgBarSize += Math.Abs(High[i] - Low[i]) / TickSize;
+					else
+						avgBarSize += Math.Abs(Open[i] - Close[i]) / TickSize;
+				}
+				avgBarSize /= LimMoyenneRange;
+				
+				double currentBarSize = LimMoyenneUseHighLow ? 
+					Math.Abs(High[0] - Low[0]) / TickSize : 
+					Math.Abs(Open[0] - Close[0]) / TickSize;
+					
+				limMoyenneCondition = currentBarSize >= (avgBarSize * LimMoyenneMultiplier);
+			}
+			
+			
+			
+			
+			
+			// New Slope Condition for UP Arrows
             if (EnableSlopeFilterUP)
             {
                 if (CurrentBar < SlopeBarsCountUP)
@@ -978,6 +1294,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			bool vaBreakoutReversalCondition = CheckVABreakoutReversalUP();
 			bool valueAreaCondition = true;
 			bool sellersCondition = CheckSellersForBuyCondition();
+			bool vaBreakoutReversalCondition2 = CheckVABreakoutReversalUP2();
+			bool vaBreakoutReversalCondition3 = CheckVABreakoutReversalUP3();
+			bool vaBreakoutReversalCondition4 = CheckVABreakoutReversalUP4();
+			bool vaBreakoutReversalCondition5 = CheckVABreakoutReversalUP5();
 			double upperThreshold, lowerThreshold;
 			
 			switch (SelectedValueArea)
@@ -1014,19 +1334,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 					valueAreaCondition = std1Condition && std2Condition;  // Les deux conditions doivent être satisfaites
 					break;
 			}
-			return bvaCondition && limusineCondition && std3Condition && 
+			return bvaCondition && limusineCondition && limMoyenneCondition && std3Condition && 
 					valueAreaCondition && vaBreakoutReversalCondition && // Ajoutez ici
 					cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition && 
 					maxMinDeltaCondition && maxVolumeCondition && maxVolumeRangeCondition && 
 					pocCondition && rangeBreakoutCondition && std3DistanceCondition && 
-					pocVolumeCondition && sellersCondition;
-			
-			// return bvaCondition && limusineCondition && std3Condition && 
-				   // valueAreaCondition && // Nouvelle condition de Value Area
-				   // cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition && 
-				   // maxMinDeltaCondition && maxVolumeCondition && maxVolumeRangeCondition && 
-				   // pocCondition && rangeBreakoutCondition && std3DistanceCondition && 
-				   // pocVolumeCondition;
+					pocVolumeCondition && vaBreakoutReversalCondition2 && sellersCondition && vaBreakoutReversalCondition3 && vaBreakoutReversalCondition4 && vaBreakoutReversalCondition5;
         }
 		
 		private bool ShouldDrawDownArrow()
@@ -1061,6 +1374,26 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             double highLowDiff = Math.Abs(High[0] - Low[0]) / TickSize;
             bool limusineCondition = (ShowLimusineOpenCloseDOWN && openCloseDiff >= MinimumTicks && openCloseDiff <= MaximumTicks && Close[0] < Open[0]) ||
                                     (ShowLimusineHighLowDOWN && highLowDiff >= MinimumTicks && highLowDiff <= MaximumTicks && Close[0] < Open[0]);
+			//
+			bool limMoyenneCondition = true;
+			if (UseLimMoyenne && CurrentBar >= LimMoyenneRange)
+			{
+				double avgBarSize = 0;
+				for (int i = 1; i <= LimMoyenneRange; i++)
+				{
+					if (LimMoyenneUseHighLow)
+						avgBarSize += Math.Abs(High[i] - Low[i]) / TickSize;
+					else
+						avgBarSize += Math.Abs(Open[i] - Close[i]) / TickSize;
+				}
+				avgBarSize /= LimMoyenneRange;
+				
+				double currentBarSize = LimMoyenneUseHighLow ? 
+					Math.Abs(High[0] - Low[0]) / TickSize : 
+					Math.Abs(Open[0] - Close[0]) / TickSize;
+					
+				limMoyenneCondition = currentBarSize >= (avgBarSize * LimMoyenneMultiplier);
+			}
 
             // New Slope Condition for DOWN Arrows
             if (EnableSlopeFilterDOWN)
@@ -1103,6 +1436,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			bool vaBreakoutReversalCondition = CheckVABreakoutReversalDOWN();
 			bool valueAreaCondition = true;
 			bool buyersCondition = CheckBuyersForSellCondition();
+			bool vaBreakoutReversalCondition2 = CheckVABreakoutReversalDOWN2();
+			bool vaBreakoutReversalCondition3 = CheckVABreakoutReversalDOWN3();
+			bool vaBreakoutReversalCondition4 = CheckVABreakoutReversalDOWN4();
+			bool vaBreakoutReversalCondition5 = CheckVABreakoutReversalDOWN5();
 			double upperThreshold, lowerThreshold;
 			
 			switch (SelectedValueArea)
@@ -1140,19 +1477,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 					break;
 			}
 			
-			return bvaCondition && limusineCondition && std3Condition && 
+			return bvaCondition && limusineCondition && limMoyenneCondition && std3Condition && 
 					valueAreaCondition && vaBreakoutReversalCondition && // Ajoutez ici
 					cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition && 
 					maxMinDeltaCondition && maxVolumeCondition && maxVolumeRangeCondition && 
 					pocCondition && rangeBreakoutCondition && std3DistanceCondition && 
-					pocVolumeCondition && buyersCondition;
-		
-			// return bvaCondition && limusineCondition && std3Condition && 
-				// valueAreaCondition && // Nouvelle condition de Value Area
-				// cumulativeDeltaCondition && barDeltaCondition && deltaPercentCondition && 
-				// maxMinDeltaCondition && maxVolumeCondition && maxVolumeRangeCondition && 
-				// pocCondition && rangeBreakoutCondition && std3DistanceCondition && 
-				// pocVolumeCondition;
+					pocVolumeCondition && vaBreakoutReversalCondition2 && buyersCondition && vaBreakoutReversalCondition3 && vaBreakoutReversalCondition4 && vaBreakoutReversalCondition5;
         }
 		
 		private void ResetSessionValues()
@@ -1548,6 +1878,24 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[NinjaScriptProperty]
 		[Display(Name = "Afficher Limusine High-Low DOWN", Description = "Afficher les limusines High-Low DOWN", Order = 6, GroupName = "0.2_Limusine Parameters")]
 		public bool ShowLimusineHighLowDOWN { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Use Limusine Average", Description = "Enable average bar size comparison", Order = 7, GroupName = "0.2_Limusine Parameters")]
+		public bool UseLimMoyenne { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0.1, 10.0)]
+		[Display(Name = "Average Multiplier", Description = "Multiplier for average comparison (1.5 = 1.5 times the average)", Order = 8, GroupName = "0.2_Limusine Parameters")]
+		public double LimMoyenneMultiplier { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(5, 50)]
+		[Display(Name = "Average Bars Range", Description = "Number of bars to calculate the average", Order = 9, GroupName = "0.2_Limusine Parameters")]
+		public int LimMoyenneRange { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Use High-Low for Average", Description = "If false, uses Open-Close for average calculation", Order = 10, GroupName = "0.2_Limusine Parameters")]
+		public bool LimMoyenneUseHighLow { get; set; }
 
         // ############ Buy #############
 		// Buy
@@ -2225,7 +2573,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[NinjaScriptProperty]
 		[Display(Name="Minimum MaxDelta0 for DOWN", Description="Minimum value for MaxDelta0 for down arrows", Order=6, GroupName="4.04_Max/Min Delta")]
 		public double MinMaxDelta0DOWN { get; set; }
-		
+		// ############## 4.05_Max Bid Ask Volume ############## //
 		[NinjaScriptProperty]
 		[Display(Name="Enable Max Volume Condition UP", Description="Enable the Max Volume condition for up arrows", Order=1, GroupName="4.05_Max Bid Ask Volume")]
 		public bool EnableMaxVolumeConditionUP { get; set; }
@@ -2242,7 +2590,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Display(Name="Max Bid - Max Ask Difference DOWN", Description="Minimum difference between Max Bid and Max Ask for down arrows", Order=4, GroupName="4.05_Max Bid Ask Volume")]
 		public int MaxBidAskDifferenceDOWN { get; set; }
 		
-		
+		// ############## 4.06_Max Bid Ask Volume Range ############## //
 		[NinjaScriptProperty]
 		[Display(Name="Enable Max Volume Range Condition UP", Description="Enable the Max Volume Range condition for up arrows", Order=1, GroupName="4.06_Max Bid Ask Volume Range")]
 		public bool EnableMaxVolumeRangeConditionUP { get; set; }
@@ -2268,7 +2616,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[NinjaScriptProperty]
 		[Display(Name="Max Volume Jump DOWN", Description="Minimum jump in Max Volume difference for down arrows", Order=6, GroupName="4.06_Max Bid Ask Volume Range")]
 		public int MaxVolumeJumpDOWN { get; set; }
-		
+		// ############## 4.07_POC Condition ############## //
 		[NinjaScriptProperty]
 		[Display(Name="Enable POC Condition UP", Description="Enable the POC condition for up arrows", Order=1, GroupName="4.07_POC Condition")]
 		public bool EnablePOCConditionUP { get; set; }
@@ -2276,7 +2624,17 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[NinjaScriptProperty]
 		[Display(Name="Enable POC Condition DOWN", Description="Enable the POC condition for down arrows", Order=2, GroupName="4.07_POC Condition")]
 		public bool EnablePOCConditionDOWN { get; set; }
-		
+
+        [NinjaScriptProperty]
+		[Range(1, 5)]
+		[Display(Name="POC Bars Look Back UP", Description="Number of previous bars to compare POC with for up arrows (1-5)", Order=3, GroupName="4.07_POC Condition")]
+		public int POCBarsLookBackUP { get; set; }
+
+		[NinjaScriptProperty]
+		[Range(1, 5)]
+		[Display(Name="POC Bars Look Back DOWN", Description="Number of previous bars to compare POC with for down arrows (1-5)", Order=4, GroupName="4.07_POC Condition")]
+		public int POCBarsLookBackDOWN { get; set; }
+		// ############## 4.08_STD3 Distance ############## //
 		[NinjaScriptProperty]
 		[Display(Name="Enable STD3 Distance Condition UP", Description="Enable the STD3 distance condition for up arrows", Order=1, GroupName="4.08_STD3 Distance")]
 		public bool EnableSTD3DistanceConditionUP { get; set; }
@@ -2311,7 +2669,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Display(Name="Minimum POC Volume DOWN", Description="Minimum POC volume required for down arrows", Order=4, GroupName="4.09_POC Volume")]
 		public int MinPOCVolumeDOWN { get; set; }
 		
-		//
+		// ############## 4.10_VA Breakout Reversal ############## //
 		[NinjaScriptProperty]
 		[Display(Name="Enable VA Breakout Reversal UP", Description="Enable the VA breakout reversal condition for up arrows", Order=1, GroupName="4.10_VA Breakout Reversal")]
 		public bool EnableVABreakoutReversalUP { get; set; }
@@ -2321,35 +2679,138 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		public bool EnableVABreakoutReversalDOWN { get; set; }
 		
 		[NinjaScriptProperty]
-		[Range(0, 10)]
+		[Range(1, 10)]
 		[Display(Name="VA Breakout Bars Range UP", Description="Number of bars to check for VA breakout (1-10)", Order=3, GroupName="4.10_VA Breakout Reversal")]
 		public int VABreakoutBarsRangeUP { get; set; }
 		
 		[NinjaScriptProperty]
-		[Range(0, 10)]
+		[Range(1, 10)]
 		[Display(Name="VA Breakout Bars Range DOWN", Description="Number of bars to check for VA breakout (1-10)", Order=4, GroupName="4.10_VA Breakout Reversal")]
 		public int VABreakoutBarsRangeDOWN { get; set; }
 		
 		[NinjaScriptProperty]
 		[Display(Name="VA Breakout Offset Ticks", Description="Number of ticks for VA breakout offset", Order=5, GroupName="4.10_VA Breakout Reversal")]
 		public int VABreakoutOffsetTicks { get; set; }
+
+		// ############## 4.11_VA Breakout Reversal 2 ############## //
+		[NinjaScriptProperty]
+		[Display(Name="Enable VA Breakout Reversal UP 2", Description="Enable VA breakout reversal condition 2 for UP signals", Order=1, GroupName="4.11_VA Breakout Reversal 2")]
+		public bool EnableVABreakoutReversalUP2 { get; set; }
+
+		[NinjaScriptProperty]
+		[Display(Name="Enable VA Breakout Reversal DOWN 2", Description="Enable VA breakout reversal condition 2 for DOWN signals", Order=2, GroupName="4.11_VA Breakout Reversal 2")]
+		public bool EnableVABreakoutReversalDOWN2 { get; set; }
+
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="VA Breakout Bars Range UP 2", Description="Number of bars to check for UP breakout pattern 2", Order=3, GroupName="4.11_VA Breakout Reversal 2")]
+		public int VABreakoutBarsRangeUP2 { get; set; }
+
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="VA Breakout Bars Range DOWN 2", Description="Number of bars to check for DOWN breakout pattern 2", Order=4, GroupName="4.11_VA Breakout Reversal 2")]
+		public int VABreakoutBarsRangeDOWN2 { get; set; }
+
+		[NinjaScriptProperty]
+		[Range(0, int.MaxValue)]
+		[Display(Name="VA Breakout Offset Ticks 2", Description="Number of ticks for offset in breakout pattern 2", Order=5, GroupName="4.11_VA Breakout Reversal 2")]
+		public int VABreakoutOffsetTicks2 { get; set; }
 		
 		//
 		[NinjaScriptProperty]
-		[Display(Name="Enable Sellers For Buy", Description="Enable sellers condition for buy signals", Order=1, GroupName="4.11_Sellers Buyers Conditions")]
+		[Display(Name="Enable Sellers For Buy", Description="Enable sellers condition for buy signals", Order=1, GroupName="4.12_Sellers Buyers Conditions")]
 		public bool EnableSellersForBuy { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name="Enable Buyers For Sell", Description="Enable buyers condition for sell signals", Order=2, GroupName="4.11_Sellers Buyers Conditions")]
+		[Display(Name="Enable Buyers For Sell", Description="Enable buyers condition for sell signals", Order=2, GroupName="4.12_Sellers Buyers Conditions")]
 		public bool EnableBuyersForSell { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name="Sellers Difference Threshold", Description="Minimum difference required for sellers condition", Order=3, GroupName="4.11_Sellers Buyers Conditions")]
+		[Display(Name="Sellers Difference Threshold", Description="Minimum difference required for sellers condition", Order=3, GroupName="4.12_Sellers Buyers Conditions")]
 		public double SellersDifferenceThreshold { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name="Buyers Difference Threshold", Description="Minimum difference required for buyers condition", Order=4, GroupName="4.11_Sellers Buyers Conditions")]
+		[Display(Name="Buyers Difference Threshold", Description="Minimum difference required for buyers condition", Order=4, GroupName="4.12_Sellers Buyers Conditions")]
 		public double BuyersDifferenceThreshold { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Enable VA Breakout Reversal UP 3", Description="Enable VA breakout reversal condition 3 for UP signals", Order=1, GroupName="4.13_VA Breakout Reversal 3")]
+		public bool EnableVABreakoutReversalUP3 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Enable VA Breakout Reversal DOWN 3", Description="Enable VA breakout reversal condition 3 for DOWN signals", Order=2, GroupName="4.13_VA Breakout Reversal 3")]
+		public bool EnableVABreakoutReversalDOWN3 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="VA Breakout Bars Range UP 3", Description="Number of bars to check for UP breakout pattern 3", Order=3, GroupName="4.13_VA Breakout Reversal 3")]
+		public int VABreakoutBarsRangeUP3 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="VA Breakout Bars Range DOWN 3", Description="Number of bars to check for DOWN breakout pattern 3", Order=4, GroupName="4.13_VA Breakout Reversal 3")]
+		public int VABreakoutBarsRangeDOWN3 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, int.MaxValue)]
+		[Display(Name="VA Breakout Offset Ticks 3", Description="Number of ticks for offset in breakout pattern 3", Order=5, GroupName="4.13_VA Breakout Reversal 3")]
+		public int VABreakoutOffsetTicks3 { get; set; }
+		
+		// Ajout des propriétés
+		[NinjaScriptProperty]
+		[Display(Name="Enable VA Breakout Reversal UP 4", Description="Enable VA breakout reversal condition 4 for UP signals", Order=1, GroupName="4.14_VA Breakout Reversal 4")]
+		public bool EnableVABreakoutReversalUP4 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Enable VA Breakout Reversal DOWN 4", Description="Enable VA breakout reversal condition 4 for DOWN signals", Order=2, GroupName="4.14_VA Breakout Reversal 4")]
+		public bool EnableVABreakoutReversalDOWN4 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="VA Breakout Bars Range UP 4", Description="Number of bars to check for UP breakout pattern 4", Order=3, GroupName="4.14_VA Breakout Reversal 4")]
+		public int VABreakoutBarsRangeUP4 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="VA Breakout Bars Range DOWN 4", Description="Number of bars to check for DOWN breakout pattern 4", Order=4, GroupName="4.14_VA Breakout Reversal 4")]
+		public int VABreakoutBarsRangeDOWN4 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, int.MaxValue)]
+		[Display(Name="VA Breakout Offset Ticks 4", Description="Number of ticks for offset in breakout pattern 4", Order=5, GroupName="4.14_VA Breakout Reversal 4")]
+		public int VABreakoutOffsetTicks4 { get; set; }
+		
+		// Ajout des propriétés pour VA Breakout Reversal 5
+		[NinjaScriptProperty]
+		[Display(Name="Enable VA Breakout Reversal UP 5", Description="Enable VA breakout reversal condition 5 for UP signals", Order=1, GroupName="4.15_VA Breakout Reversal 5")]
+		public bool EnableVABreakoutReversalUP5 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Enable VA Breakout Reversal DOWN 5", Description="Enable VA breakout reversal condition 5 for DOWN signals", Order=2, GroupName="4.15_VA Breakout Reversal 5")]
+		public bool EnableVABreakoutReversalDOWN5 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="VA Breakout Bars Range UP 5", Description="Number of bars to check for UP breakout pattern 5", Order=3, GroupName="4.15_VA Breakout Reversal 5")]
+		public int VABreakoutBarsRangeUP5 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="VA Breakout Bars Range DOWN 5", Description="Number of bars to check for DOWN breakout pattern 5", Order=4, GroupName="4.15_VA Breakout Reversal 5")]
+		public int VABreakoutBarsRangeDOWN5 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, int.MaxValue)]
+		[Display(Name="VA Breakout Offset Ticks 5", Description="Number of ticks for offset in breakout pattern 5", Order=5, GroupName="4.15_VA Breakout Reversal 5")]
+		public int VABreakoutOffsetTicks5 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Use Previous Bar for UP", Description="Use previous bar (Low[1]) instead of current bar (Low[0]) for UP signals", Order=6, GroupName="4.15_VA Breakout Reversal 5")]
+		public bool UsePreviousBarUP5 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Use Previous Bar for DOWN", Description="Use previous bar (High[1]) instead of current bar (High[0]) for DOWN signals", Order=7, GroupName="4.15_VA Breakout Reversal 5")]
+		public bool UsePreviousBarDOWN5 { get; set; }
 		
 		// ############ Initial Balance ################ //
 		[NinjaScriptProperty]
