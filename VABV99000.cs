@@ -137,12 +137,21 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				Sl											= 15;
 				Pt											= 10;
 				EnableDynamicStops = false;
+				EnableDynamicStopLossMultiplier = false;
+				DynamicStopLossMultiplier = 1.0;
+				EnableDynamicTargetMultiplier = false;
+				DynamicTargetMultiplier = 1.0;
 				UseBarSizeForStops = false;
+				EnableBarStopLossMultiplier = false;
+				BarStopLossMultiplier = 1.0;
+				EnableBarTargetMultiplier = false;
+				BarTargetMultiplier = 1.0;
+				UsePOCBasedStopLoss = false;
+				POCStopLossOffset = 5;
 				UseParabolicStop = false;
 				EnableBreakEven = false;
                 BreakEvenTicks = 5;
-				UsePOCBasedStopLoss = false;
-				POCStopLossOffset = 5;
+				
 				// Paramètres VAB
                 ResetPeriod = 120;
                 SignalTimingMode = SignalTimeMode.Bars;
@@ -1572,33 +1581,74 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             return true;
         }
 		
+		// private void SetDynamicStopsAndTargets(bool isLong)
+        // {
+            // double vwap = Values[0][0];
+            // double stdDev1Upper = Values[1][0];
+            // double stdDev1Lower = Values[2][0];
+            // double ptDistance;
+            // double slDistance;
+            // if (isLong)
+            // {
+                // ptDistance = (stdDev1Upper - vwap) / TickSize;
+                // slDistance = (vwap - stdDev1Lower) / TickSize;
+            // }
+            // else
+            // {
+                // ptDistance = (vwap - stdDev1Lower) / TickSize;
+                // slDistance = (stdDev1Upper - vwap) / TickSize;
+            // }
+            // ptDistance = Math.Max(1, Math.Round(Math.Abs(ptDistance)));
+            // slDistance = Math.Max(1, Math.Round(Math.Abs(slDistance)));
+            // SetStopLoss(CalculationMode.Ticks, slDistance);
+            // SetProfitTarget(CalculationMode.Ticks, ptDistance);
+        // }
+		
+		
+		//
 		private void SetDynamicStopsAndTargets(bool isLong)
-        {
-            double vwap = Values[0][0];
-            double stdDev1Upper = Values[1][0];
-            double stdDev1Lower = Values[2][0];
-
-            double ptDistance;
-            double slDistance;
-
-            if (isLong)
-            {
-                ptDistance = (stdDev1Upper - vwap) / TickSize;
-                slDistance = (vwap - stdDev1Lower) / TickSize;
-            }
-            else
-            {
-                ptDistance = (vwap - stdDev1Lower) / TickSize;
-                slDistance = (stdDev1Upper - vwap) / TickSize;
-            }
-
-            ptDistance = Math.Max(1, Math.Round(Math.Abs(ptDistance)));
-            slDistance = Math.Max(1, Math.Round(Math.Abs(slDistance)));
-
-            // Définir le stop loss et le profit target dynamiques
-            SetStopLoss(CalculationMode.Ticks, slDistance);
-            SetProfitTarget(CalculationMode.Ticks, ptDistance);
-        }
+		{
+			double vwap = Values[0][0];
+			double stdDev1Upper = Values[1][0];
+			double stdDev1Lower = Values[2][0];
+		
+			double ptDistance;
+			double slDistance;
+		
+			if (isLong)
+			{
+				ptDistance = (stdDev1Upper - vwap) / TickSize;
+				slDistance = (vwap - stdDev1Lower) / TickSize;
+			}
+			else
+			{
+				ptDistance = (vwap - stdDev1Lower) / TickSize;
+				slDistance = (stdDev1Upper - vwap) / TickSize;
+			}
+		
+			// Appliquer les multiplicateurs si activés
+			if (EnableDynamicStopLossMultiplier)
+			{
+				slDistance = Math.Max(1, Math.Round(slDistance * DynamicStopLossMultiplier));
+			}
+			else
+			{
+				slDistance = Math.Max(1, Math.Round(Math.Abs(slDistance)));
+			}
+		
+			if (EnableDynamicTargetMultiplier)
+			{
+				ptDistance = Math.Max(1, Math.Round(ptDistance * DynamicTargetMultiplier));
+			}
+			else
+			{
+				ptDistance = Math.Max(1, Math.Round(Math.Abs(ptDistance)));
+			}
+		
+			// Définir le stop loss et le profit target dynamiques
+			SetStopLoss(CalculationMode.Ticks, slDistance);
+			SetProfitTarget(CalculationMode.Ticks, ptDistance);
+		}
 		
 		private void SetEntryParameters(bool isLong)
 		{
@@ -1649,16 +1699,39 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			SetStopLoss(CalculationMode.Price, stopLossPrice);
 		}
 
-        private void SetStopsBasedOnBarSize(bool isLong)
-        {
-            // Calculer la taille de la barre actuelle en ticks
-            double barSizeTicks = (High[0] - Low[0]) / TickSize;
-            barSizeTicks = Math.Max(1, Math.Round(Math.Abs(barSizeTicks)));
-
-            // Définir le stop loss et le profit target en fonction de la taille de la barre
-            SetStopLoss(CalculationMode.Ticks, barSizeTicks);
-            SetProfitTarget(CalculationMode.Ticks, barSizeTicks);
-        }
+        // private void SetStopsBasedOnBarSize(bool isLong)
+        // {
+            // double barSizeTicks = (High[0] - Low[0]) / TickSize;
+            // barSizeTicks = Math.Max(1, Math.Round(Math.Abs(barSizeTicks)));
+            // SetStopLoss(CalculationMode.Ticks, barSizeTicks);
+            // SetProfitTarget(CalculationMode.Ticks, barSizeTicks);
+        // }
+		
+		//
+		private void SetStopsBasedOnBarSize(bool isLong)
+		{
+			// Calculer la taille de la barre actuelle en ticks
+			double barSizeTicks = (High[0] - Low[0]) / TickSize;
+			barSizeTicks = Math.Max(1, Math.Round(Math.Abs(barSizeTicks)));
+		
+			// Appliquer les multiplicateurs si activés
+			double stopLossTicks = barSizeTicks;
+			double targetTicks = barSizeTicks;
+		
+			if (EnableBarStopLossMultiplier)
+			{
+				stopLossTicks = Math.Max(1, Math.Round(barSizeTicks * BarStopLossMultiplier));
+			}
+		
+			if (EnableBarTargetMultiplier)
+			{
+				targetTicks = Math.Max(1, Math.Round(barSizeTicks * BarTargetMultiplier));
+			}
+		
+			// Définir le stop loss et le profit target
+			SetStopLoss(CalculationMode.Ticks, stopLossTicks);
+			SetProfitTarget(CalculationMode.Ticks, targetTicks);
+		}
 		
 		private void ApplyIBLogic(ref bool showUpArrow, ref bool showDownArrow)
 		{
@@ -1767,36 +1840,74 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Display(Name="Pt", Order=3, GroupName="0.02_Entry_Parameters")]
 		public int Pt
 		{ get; set; }
-		
+		// ======================================
 		[NinjaScriptProperty]
         [Display(Name = "Enable Dynamic Stops", Order = 4, GroupName = "0.02_Entry_Parameters")]
         public bool EnableDynamicStops { get; set; }
 		
 		[NinjaScriptProperty]
-        [Display(Name = "Use Bar Size For Stops", Order = 5, GroupName = "0.02_Entry_Parameters")]
+		[Display(Name="Enable Dynamic Stop Loss Multiplier", Order=5, GroupName="0.02_Entry_Parameters")]
+		public bool EnableDynamicStopLossMultiplier { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0.5, 10.0)]
+		[Display(Name="Dynamic Stop Loss Multiplier", Order=6, GroupName="0.02_Entry_Parameters")]
+		public double DynamicStopLossMultiplier { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Enable Dynamic Target Multiplier", Order=7, GroupName="0.02_Entry_Parameters")]
+		public bool EnableDynamicTargetMultiplier { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0.5, 10.0)]
+		[Display(Name="Dynamic Target Multiplier", Order=8, GroupName="0.02_Entry_Parameters")]
+		public double DynamicTargetMultiplier { get; set; }
+		// ===================================
+		[NinjaScriptProperty]
+        [Display(Name = "Use Bar Size For Stops", Order = 9, GroupName = "0.02_Entry_Parameters")]
         public bool UseBarSizeForStops { get; set; }
 		
 		[NinjaScriptProperty]
-        [Display(Name = "Use Parabolic Stop", Order = 6, GroupName = "0.02_Entry_Parameters")]
-        public bool UseParabolicStop { get; set; }
+		[Display(Name="Enable Bar Stop Loss Multiplier", Order=10, GroupName="0.02_Entry_Parameters")]
+		public bool EnableBarStopLossMultiplier { get; set; }
 		
 		[NinjaScriptProperty]
-        [Display(Name="Enable Break Even", Description="Activate Break Even feature", Order=7, GroupName="0.02_Entry_Parameters")]
-        public bool EnableBreakEven { get; set; }
-
-        [NinjaScriptProperty]
-        [Range(1, int.MaxValue)]
-        [Display(Name="Break Even Ticks", Description="Number of ticks in profit before activating Break Even", Order=8, GroupName="0.02_Entry_Parameters")]
-        public int BreakEvenTicks { get; set; }
+		[Range(0.5, 10.0)]
+		[Display(Name="Bar Stop Loss Multiplier", Order=11, GroupName="0.02_Entry_Parameters")]
+		public double BarStopLossMultiplier { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name="Use POC-based Stop Loss", Description="Use Point of Control for Stop Loss", Order=9, GroupName="0.02_Entry_Parameters")]
+		[Display(Name="Enable Bar Target Multiplier", Order=12, GroupName="0.02_Entry_Parameters")]
+		public bool EnableBarTargetMultiplier { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0.5, 10.0)]
+		[Display(Name="Bar Target Multiplier", Order=13, GroupName="0.02_Entry_Parameters")]
+		public double BarTargetMultiplier { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Use POC-based Stop Loss", Description="Use Point of Control for Stop Loss", Order=14, GroupName="0.02_Entry_Parameters")]
 		public bool UsePOCBasedStopLoss { get; set; }
 		
 		[NinjaScriptProperty]
 		[Range(1, int.MaxValue)]
-		[Display(Name="POC Stop Loss Offset", Description="Number of ticks to add to POC for Stop Loss", Order=10, GroupName="0.02_Entry_Parameters")]
+		[Display(Name="POC Stop Loss Offset", Description="Number of ticks to add to POC for Stop Loss", Order=15, GroupName="0.02_Entry_Parameters")]
 		public int POCStopLossOffset { get; set; }
+		// ==============================================
+		[NinjaScriptProperty]
+        [Display(Name = "Use Parabolic Stop", Order = 16, GroupName = "0.02_Entry_Parameters")]
+        public bool UseParabolicStop { get; set; }
+		
+		[NinjaScriptProperty]
+        [Display(Name="Enable Break Even", Description="Activate Break Even feature", Order=17, GroupName="0.02_Entry_Parameters")]
+        public bool EnableBreakEven { get; set; }
+
+        [NinjaScriptProperty]
+        [Range(1, int.MaxValue)]
+        [Display(Name="Break Even Ticks", Description="Number of ticks in profit before activating Break Even", Order=18, GroupName="0.02_Entry_Parameters")]
+        public int BreakEvenTicks { get; set; }
+		
+		
 		
 		// ###################################################### //
 		
@@ -1889,7 +2000,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		public double LimMoyenneMultiplier { get; set; }
 		
 		[NinjaScriptProperty]
-		[Range(5, 50)]
+		[Range(0, 50)]
 		[Display(Name = "Average Bars Range", Description = "Number of bars to calculate the average", Order = 9, GroupName = "0.2_Limusine Parameters")]
 		public int LimMoyenneRange { get; set; }
 		
@@ -2415,7 +2526,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			set { enableCumulativeDeltaConditionDOWN = value; }
 		}
 	
-		[Range(2, 5)]
+		[Range(0, 5)]
 		[NinjaScriptProperty]
 		[Display(Name="Cumulative Delta Bars Range UP", Description="Number of bars to check for up arrows (2-5)", Order=3, GroupName="4.01_Cumulative Delta")]
 		public int CumulativeDeltaBarsRangeUP
@@ -2424,7 +2535,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			set { cumulativeDeltaBarsRangeUP = Math.Max(2, Math.Min(5, value)); }
 		}
 	
-		[Range(2, 5)]
+		[Range(0, 5)]
 		[NinjaScriptProperty]
 		[Display(Name="Cumulative Delta Bars Range DOWN", Description="Number of bars to check for down arrows (2-5)", Order=4, GroupName="4.01_Cumulative Delta")]
 		public int CumulativeDeltaBarsRangeDOWN
@@ -2465,7 +2576,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			set { enableBarDeltaConditionDOWN = value; }
 		}
 		
-		[Range(2, 5)]
+		[Range(0, 5)]
 		[NinjaScriptProperty]
 		[Display(Name="Bar Delta Bars Range UP", Description="Number of bars to check for up arrows (2-5)", Order=3, GroupName="4.02_Bar Delta")]
 		public int BarDeltaBarsRangeUP
@@ -2474,7 +2585,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			set { barDeltaBarsRangeUP = Math.Max(2, Math.Min(5, value)); }
 		}
 		
-		[Range(2, 5)]
+		[Range(0, 5)]
 		[NinjaScriptProperty]
 		[Display(Name="Bar Delta Bars Range DOWN", Description="Number of bars to check for down arrows (2-5)", Order=4, GroupName="4.02_Bar Delta")]
 		public int BarDeltaBarsRangeDOWN
@@ -2516,7 +2627,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			set { enableDeltaPercentConditionDOWN = value; }
 		}
 		
-		[Range(2, 5)]
+		[Range(0, 5)]
 		[NinjaScriptProperty]
 		[Display(Name="Delta Percent Bars Range UP", Description="Number of bars to check for up arrows (2-5)", Order=3, GroupName="4.03_Delta Percent")]
 		public int DeltaPercentBarsRangeUP
@@ -2525,7 +2636,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			set { deltaPercentBarsRangeUP = Math.Max(2, Math.Min(5, value)); }
 		}
 		
-		[Range(2, 5)]
+		[Range(0, 5)]
 		[NinjaScriptProperty]
 		[Display(Name="Delta Percent Bars Range DOWN", Description="Number of bars to check for down arrows (2-5)", Order=4, GroupName="4.03_Delta Percent")]
 		public int DeltaPercentBarsRangeDOWN
@@ -2679,12 +2790,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		public bool EnableVABreakoutReversalDOWN { get; set; }
 		
 		[NinjaScriptProperty]
-		[Range(1, 10)]
+		[Range(0, 10)]
 		[Display(Name="VA Breakout Bars Range UP", Description="Number of bars to check for VA breakout (1-10)", Order=3, GroupName="4.10_VA Breakout Reversal")]
 		public int VABreakoutBarsRangeUP { get; set; }
 		
 		[NinjaScriptProperty]
-		[Range(1, 10)]
+		[Range(0, 10)]
 		[Display(Name="VA Breakout Bars Range DOWN", Description="Number of bars to check for VA breakout (1-10)", Order=4, GroupName="4.10_VA Breakout Reversal")]
 		public int VABreakoutBarsRangeDOWN { get; set; }
 		
