@@ -27,6 +27,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
 	public class VABV99000 : Strategy
 	{
+		private bool trailStopStd1ActivatedLong = false;
+		private bool trailStopStd1ActivatedShort = false;
+		private double entryPrice = 0;
+		
 		private double sumPriceVolume;
         private double sumVolume;
         private double sumSquaredPriceVolume;
@@ -152,6 +156,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				EnableBreakEven = false;
                 BreakEvenTicks = 5;
 				PreventMultiplePositions = false;
+				EnableTrailStopStd1 = false;
+				TrailStopStd1ActivationTicksUP = 10;
+				TrailStopStd1ActivationTicksDOWN = 10;
 				// Paramètres VAB
                 ResetPeriod = 120;
                 SignalTimingMode = SignalTimeMode.Bars;
@@ -390,6 +397,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			
 			if (CurrentBar < 20 || !(Bars.BarsSeries.BarsType is NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType))
 				return;
+			ManageTrailStopStd1();
 			// Gérer la fermeture des positions en dehors des heures de trading
 			bool isInTradingPeriod = IsInTradingPeriod(Time[0]);
 			if (ClosePositionsOutsideHours && !isInTradingPeriod)
@@ -602,6 +610,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             if (execution.Order.OrderState == OrderState.Filled)
             {
                 breakEvenActivated = false;
+				trailStopStd1ActivatedLong = false;
+				trailStopStd1ActivatedShort = false;
+				entryPrice = execution.Order.AverageFillPrice;
             }
         }
 		
@@ -1236,6 +1247,71 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				}
 			}
 			return false;
+		}
+		
+		//
+		private void ManageTrailStopStd1()
+		{
+			if (!EnableTrailStopStd1)
+				return;
+		
+			foreach (Position position in Positions)
+			{
+				// Pour les positions longues
+				if (position.MarketPosition == MarketPosition.Long)
+				{
+					// Si c'est une nouvelle position, réinitialiser les flags et sauvegarder le prix d'entrée
+					if (position.AveragePrice != entryPrice)
+					{
+						trailStopStd1ActivatedLong = false;
+						entryPrice = position.AveragePrice;
+					}
+		
+					// Vérifier si le stop suiveur doit être activé
+					if (!trailStopStd1ActivatedLong)
+					{
+						double profitTicks = (Close[0] - position.AveragePrice) / TickSize;
+						if (profitTicks >= TrailStopStd1ActivationTicksUP)
+						{
+							trailStopStd1ActivatedLong = true;
+						}
+					}
+		
+					// Si le stop suiveur est activé et le prix est au-dessus de StdDev1 Upper
+					if (trailStopStd1ActivatedLong && Close[0] > Values[1][0])
+					{
+						// Mettre à jour le stop loss au niveau de StdDev1 Upper
+						SetStopLoss(CalculationMode.Price, Values[1][0]);
+					}
+				}
+				// Pour les positions courtes
+				else if (position.MarketPosition == MarketPosition.Short)
+				{
+					// Si c'est une nouvelle position, réinitialiser les flags et sauvegarder le prix d'entrée
+					if (position.AveragePrice != entryPrice)
+					{
+						trailStopStd1ActivatedShort = false;
+						entryPrice = position.AveragePrice;
+					}
+		
+					// Vérifier si le stop suiveur doit être activé
+					if (!trailStopStd1ActivatedShort)
+					{
+						double profitTicks = (position.AveragePrice - Close[0]) / TickSize;
+						if (profitTicks >= TrailStopStd1ActivationTicksDOWN)
+						{
+							trailStopStd1ActivatedShort = true;
+						}
+					}
+		
+					// Si le stop suiveur est activé et le prix est en-dessous de StdDev1 Lower
+					if (trailStopStd1ActivatedShort && Close[0] < Values[2][0])
+					{
+						// Mettre à jour le stop loss au niveau de StdDev1 Lower
+						SetStopLoss(CalculationMode.Price, Values[2][0]);
+					}
+				}
+			}
 		}
 
 
@@ -1950,6 +2026,20 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[NinjaScriptProperty]
 		[Display(Name="Prevent Multiple Positions", Description="Prevent entering new positions if a position already exists", Order=19, GroupName="0.02_Entry_Parameters")]
 		public bool PreventMultiplePositions { get; set; }
+		// Ajouter les nouvelles propriétés pour le stop suiveur
+		[NinjaScriptProperty]
+		[Display(Name="Enable Trail Stop Std1", Description="Enable trailing stop based on StdDev1", Order=20, GroupName="0.02_Entry_Parameters")]
+		public bool EnableTrailStopStd1 { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="Trail Stop Std1 Activation Ticks UP", Description="Number of ticks in profit before activating trail stop for longs", Order=21, GroupName="0.02_Entry_Parameters")]
+		public int TrailStopStd1ActivationTicksUP { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="Trail Stop Std1 Activation Ticks DOWN", Description="Number of ticks in profit before activating trail stop for shorts", Order=22, GroupName="0.02_Entry_Parameters")]
+		public int TrailStopStd1ActivationTicksDOWN { get; set; }
 		
 		
 		// ###################################################### //
