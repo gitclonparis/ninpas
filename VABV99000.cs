@@ -132,7 +132,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				Period1End = DateTime.Parse("17:30", System.Globalization.CultureInfo.InvariantCulture);
 				Period2Start = DateTime.Parse("18:30", System.Globalization.CultureInfo.InvariantCulture);
 				Period2End = DateTime.Parse("20:30", System.Globalization.CultureInfo.InvariantCulture);
-				
+				ClosePositionsOutsideHours = false;
 				Qty											= 1;
 				Sl											= 15;
 				Pt											= 10;
@@ -151,7 +151,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				UseParabolicStop = false;
 				EnableBreakEven = false;
                 BreakEvenTicks = 5;
-				
+				PreventMultiplePositions = false;
 				// Paramètres VAB
                 ResetPeriod = 120;
                 SignalTimingMode = SignalTimeMode.Bars;
@@ -390,6 +390,24 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			
 			if (CurrentBar < 20 || !(Bars.BarsSeries.BarsType is NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType))
 				return;
+			// Gérer la fermeture des positions en dehors des heures de trading
+			bool isInTradingPeriod = IsInTradingPeriod(Time[0]);
+			if (ClosePositionsOutsideHours && !isInTradingPeriod)
+			{
+				foreach (Position position in Positions)
+				{
+					if (position.MarketPosition == MarketPosition.Long)
+					{
+						ExitLong();
+					}
+					else if (position.MarketPosition == MarketPosition.Short)
+					{
+						ExitShort();
+					}
+				}
+				// Retourner après avoir fermé les positions si nous sommes en dehors des heures de trading
+				return;
+			}
 			
 			var currentBarVolumes = barsType.Volumes[CurrentBar];
 			// Calcul du POC
@@ -478,7 +496,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
             barsSinceReset++;
 			// Vérifier si nous sommes dans une période de trading autorisée
-			bool isInTradingPeriod = IsInTradingPeriod(Time[0]);
+			// bool isInTradingPeriod = IsInTradingPeriod(Time[0]);
             // Vérification des conditions combinées
             bool showUpArrow = ShouldDrawUpArrow() && CheckVolumetricConditions(true);
             bool showDownArrow = ShouldDrawDownArrow() && CheckVolumetricConditions(false);
@@ -495,7 +513,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				showDownArrow = showDownArrow && (pocPrice >= closePrice + pocTicksDistance * tickSize);
 			}
 			
-			if (isInTradingPeriod)
+			if (isInTradingPeriod && !HasExistingPositions())
 			{
 				// //			
 				if (showUpArrow)
@@ -1201,6 +1219,24 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		
 			return highEntersVA && closesBelowVA;
 		}
+		
+		// Ajouter une nouvelle fonction de vérification des positions
+		private bool HasExistingPositions()
+		{
+			if (!PreventMultiplePositions)
+				return false;
+		
+			foreach (Position position in Positions)
+			{
+				// Si une position existe déjà (longue ou courte), retourner true
+				if (position.MarketPosition == MarketPosition.Long || 
+					position.MarketPosition == MarketPosition.Short)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
 
 
 		// ########################################################################
@@ -1822,6 +1858,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Display(Name="Période 2 - Fin", Order=4, GroupName="0.01_Time_Parameters")]
 		public DateTime Period2End { get; set; }
 		
+		[NinjaScriptProperty]
+		[Display(Name="Close Positions Outside Trading Hours", Description="Automatically close all positions outside trading hours", Order=5, GroupName="0.01_Time_Parameters")]
+		public bool ClosePositionsOutsideHours { get; set; }
+		
 		// ############# 1.Etry_Parameters ####################
 		[NinjaScriptProperty]
 		[Range(1, int.MaxValue)]
@@ -1907,6 +1947,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
         [Display(Name="Break Even Ticks", Description="Number of ticks in profit before activating Break Even", Order=18, GroupName="0.02_Entry_Parameters")]
         public int BreakEvenTicks { get; set; }
 		
+		[NinjaScriptProperty]
+		[Display(Name="Prevent Multiple Positions", Description="Prevent entering new positions if a position already exists", Order=19, GroupName="0.02_Entry_Parameters")]
+		public bool PreventMultiplePositions { get; set; }
 		
 		
 		// ###################################################### //
