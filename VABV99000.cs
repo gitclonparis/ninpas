@@ -602,6 +602,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                     }
                 }
             }
+			Print($"Time: {Time[0]}, sumVolume: {sumVolume}, vwap: {vwap}, stdDev: {stdDev}, Values[1][0]: {Values[1][0]}, Values[2][0]: {Values[2][0]}");
 		}
 		
 		protected override void OnExecutionUpdate(Execution execution, string executionId, double price, int quantity, MarketPosition marketPosition, string orderId, DateTime time)
@@ -2659,22 +2660,22 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			set { enableCumulativeDeltaConditionDOWN = value; }
 		}
 	
-		[Range(0, 5)]
+		[Range(0, 10)]
 		[NinjaScriptProperty]
 		[Display(Name="Cumulative Delta Bars Range UP", Description="Number of bars to check for up arrows (2-5)", Order=3, GroupName="4.01_Cumulative Delta")]
 		public int CumulativeDeltaBarsRangeUP
 		{
 			get { return cumulativeDeltaBarsRangeUP; }
-			set { cumulativeDeltaBarsRangeUP = Math.Max(2, Math.Min(5, value)); }
+			set { cumulativeDeltaBarsRangeUP = Math.Max(0, Math.Min(10, value)); }
 		}
 	
-		[Range(0, 5)]
+		[Range(0, 10)]
 		[NinjaScriptProperty]
 		[Display(Name="Cumulative Delta Bars Range DOWN", Description="Number of bars to check for down arrows (2-5)", Order=4, GroupName="4.01_Cumulative Delta")]
 		public int CumulativeDeltaBarsRangeDOWN
 		{
 			get { return cumulativeDeltaBarsRangeDOWN; }
-			set { cumulativeDeltaBarsRangeDOWN = Math.Max(2, Math.Min(5, value)); }
+			set { cumulativeDeltaBarsRangeDOWN = Math.Max(0, Math.Min(10, value)); }
 		}
 	
 		[NinjaScriptProperty]
