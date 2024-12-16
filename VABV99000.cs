@@ -132,6 +132,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				RealtimeErrorHandling						= RealtimeErrorHandling.StopCancelClose;
 				StopTargetHandling							= StopTargetHandling.PerEntryExecution;
 				IsInstantiatedOnEachOptimizationIteration	= false;
+				
 				Period1Start = DateTime.Parse("15:30", System.Globalization.CultureInfo.InvariantCulture);
 				Period1End = DateTime.Parse("17:30", System.Globalization.CultureInfo.InvariantCulture);
 				Period2Start = DateTime.Parse("18:30", System.Globalization.CultureInfo.InvariantCulture);
@@ -159,6 +160,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				EnableTrailStopStd1 = false;
 				TrailStopStd1ActivationTicksUP = 10;
 				TrailStopStd1ActivationTicksDOWN = 10;
+				
+				
 				// Paramètres VAB
                 ResetPeriod = 120;
                 SignalTimingMode = SignalTimeMode.Bars;
