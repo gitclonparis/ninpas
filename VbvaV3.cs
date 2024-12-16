@@ -24,7 +24,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 
 namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
-    public class VvabS : Strategy
+    public class VbvaV3 : Strategy
     {
         private double sumPriceVolume;
         private double sumVolume;
@@ -66,7 +66,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             if (State == State.SetDefaults)
             {
                 Description = @"Indicateur BVA-Limusine combiné";
-                Name = "VvabS";
+                Name = "VbvaV3";
                 Calculate = Calculate.OnEachTick;
                 IsOverlay = true;
                 DisplayInDataBox = true;
@@ -360,9 +360,27 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		
 		private bool IsInTradingPeriod(DateTime time)
 		{
-			TimeSpan currentTime = time.TimeOfDay;
-			return (currentTime >= Period1Start.TimeOfDay && currentTime <= Period1End.TimeOfDay) ||
-				(currentTime >= Period2Start.TimeOfDay && currentTime <= Period2End.TimeOfDay);
+			//
+			// Obtenir la session de trading actuelle
+			var tradingDay = sessionIterator.GetTradingDay(time);
+			
+			// Construire les dates/heures complètes pour les périodes de trading
+			var period1StartTime = tradingDay.Date + Period1Start.TimeOfDay;
+			var period1EndTime = tradingDay.Date + Period1End.TimeOfDay;
+			var period2StartTime = tradingDay.Date + Period2Start.TimeOfDay;
+			var period2EndTime = tradingDay.Date + Period2End.TimeOfDay;
+			
+			// Gérer le cas où la période se termine le jour suivant
+			if (Period1End.TimeOfDay < Period1Start.TimeOfDay)
+				period1EndTime = period1EndTime.AddDays(1);
+			if (Period2End.TimeOfDay < Period2Start.TimeOfDay)
+				period2EndTime = period2EndTime.AddDays(1);
+			
+			// Vérifier si le temps actuel est dans l'une des périodes de trading
+			bool inPeriod1 = time >= period1StartTime && time <= period1EndTime;
+			bool inPeriod2 = time >= period2StartTime && time <= period2EndTime;
+			
+			return inPeriod1 || inPeriod2;
 		}
 		
 		// Ajouter une nouvelle fonction de vérification des positions
@@ -505,9 +523,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			double lowerLevelWithOffset = previousSessionVALowerLevel - (ValueAreaOffsetTicks * TickSize);
 		
 			return Close[0] <= upperLevelWithOffset && Close[0] >= lowerLevelWithOffset;
-			// if (!BlockSignalsInPreviousValueArea || previousSessionVAUpperLevel == double.MinValue || previousSessionVALowerLevel == double.MaxValue)
-				// return false;
-			// return Close[0] <= previousSessionVAUpperLevel && Close[0] >= previousSessionVALowerLevel;
 		}
 
 		// ############################################################################################################### //

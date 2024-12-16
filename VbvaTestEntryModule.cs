@@ -24,8 +24,32 @@ using NinjaTrader.NinjaScript.DrawingTools;
 
 namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
-    public class VvabS : Strategy
+    public class VbvaTestEntryModule : Strategy
     {
+		// Breaking Even Module Constants
+        private const string LongPos = "Open Long";
+        private const string ShortPos = "Open Short";
+        private const string ProfitLong1 = "Profit Long 1";
+        private const string ProfitLong2 = "Profit Long 2";
+        private const string StopLong = "Stop Long";
+        private const string ProfitShort1 = "Profit Short 1";
+        private const string StopShort = "Stop Short";
+        private const string ProfitShort2 = "Profit Short 2";
+        private const string BreakEvenShort = "BE Short";
+        private const string BreakEvenLong = "BE Long";
+
+        // Breaking Even Module Variables
+        private int _posSize;
+        private CurrentPos _currentPosition;
+        private double _stop;
+        private double _profit1;
+        private double _profit2;
+        private Order _stopOrder;
+        private Order _profitOrder1;
+        private Order _profitOrder2;
+        private double _pos1;
+        private double _pos2;
+		// ################## //
         private double sumPriceVolume;
         private double sumVolume;
         private double sumSquaredPriceVolume;
@@ -60,19 +84,34 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		private bool ibPeriod = true;
 		private SessionIterator sessionIterator;
 		private DateTime currentDate = DateTime.MinValue;
+		
+		public enum CurrentPos
+        {
+            Short,
+            Long,
+            None
+        }
 
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
             {
                 Description = @"Indicateur BVA-Limusine combiné";
-                Name = "VvabS";
+                Name = "VbvaTestEntryModule";
                 Calculate = Calculate.OnEachTick;
                 IsOverlay = true;
                 DisplayInDataBox = true;
                 DrawOnPricePanel = true;
                 ScaleJustification = NinjaTrader.Gui.Chart.ScaleJustification.Right;
                 IsInstantiatedOnEachOptimizationIteration	= false;
+				
+				// Breaking Even Module Defaults
+                PosSize = 10;
+                PositionSplitPercent = 50;
+                StopTicks = 20;
+                ProfitOneTicks = 20;
+                ProfitTwoTicks = 30;
+                BreakEvenIsOn = false;
 				
 				Period1Start = DateTime.Parse("15:30", System.Globalization.CultureInfo.InvariantCulture);
 				Period1End = DateTime.Parse("17:30", System.Globalization.CultureInfo.InvariantCulture);
@@ -182,6 +221,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             else if (State == State.Configure)
             {
                 ResetValues(DateTime.MinValue);
+				_posSize = PosSize;
             }
             else if (State == State.DataLoaded)
             {
@@ -193,26 +233,34 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
         protected override void OnBarUpdate()
         {
-			// if (BarsInProgress != 0) 
-				// return;
             if (CurrentBars[0] < 20)
                 return;
 			
+			// bool isInTradingPeriod = IsInTradingPeriod(Time[0]);
+			// if (ClosePositionsOutsideHours && !isInTradingPeriod)
+			// {
+				// foreach (Position position in Positions)
+				// {
+					// if (position.MarketPosition == MarketPosition.Long)
+					// {
+						// ExitLong();
+					// }
+					// else if (position.MarketPosition == MarketPosition.Short)
+					// {
+						// ExitShort();
+					// }
+				// }
+			// }
+			
 			bool isInTradingPeriod = IsInTradingPeriod(Time[0]);
-			if (ClosePositionsOutsideHours && !isInTradingPeriod)
-			{
-				foreach (Position position in Positions)
-				{
-					if (position.MarketPosition == MarketPosition.Long)
-					{
-						ExitLong();
-					}
-					else if (position.MarketPosition == MarketPosition.Short)
-					{
-						ExitShort();
-					}
-				}
-			}
+            if (ClosePositionsOutsideHours && !isInTradingPeriod)
+            {
+                if (Position.MarketPosition == MarketPosition.Long)
+                    ExitLong();
+                else if (Position.MarketPosition == MarketPosition.Short)
+                    ExitShort();
+                return;
+            }
 			
 			figVA = ResetPeriod - 1;
             DateTime currentBarTime = Time[0];
@@ -328,13 +376,15 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 figVAPointsDrawn = false;
             }
 			
-			if (isInTradingPeriod && !HasExistingPositions())
+			// if (isInTradingPeriod && !HasExistingPositions())
+			if (isInTradingPeriod && Position.MarketPosition == MarketPosition.Flat)
 			{
 				//
 				if (ActiveBuy && ShouldDrawUpArrow())
 				{
-					SetEntryParameters(true);
-					EnterLong(Convert.ToInt32(Qty), @"Long");
+					// SetEntryParameters(true);
+					// EnterLong(Convert.ToInt32(Qty), @"Long");
+					EnterLong(PosSize, LongPos);
 					Draw.ArrowUp(this, "UpArrow" + CurrentBar, true, 0, Low[0] - 2 * TickSize, Brushes.Green);
 					upperBreakoutCount++;
 					var (redDotPrice, blueDotPrice) = CalculateDotLevels(true, Close[0]);
@@ -344,8 +394,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				}
 				else if (ActiveSell && ShouldDrawDownArrow())
 				{
-					SetEntryParameters(false);
-					EnterShort(Convert.ToInt32(Qty), @"Short");
+					// SetEntryParameters(false);
+					// EnterShort(Convert.ToInt32(Qty), @"Short");
+					EnterShort(PosSize, ShortPos);
 					Draw.ArrowDown(this, "DownArrow" + CurrentBar, true, 0, High[0] + 2 * TickSize, Brushes.Red);
 					lowerBreakoutCount++;
 					var (redDotPrice, blueDotPrice) = CalculateDotLevels(false, Close[0]);
@@ -357,12 +408,120 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
         }
 		// ############################################################################################################### //
 		// ############################################################################################################### //
+		protected override void OnExecutionUpdate(Execution execution, string executionId, double price, int quantity,
+            MarketPosition marketPosition, string orderId, DateTime time)
+        {
+            if (IsEntryOrderFilled(execution))
+            {
+                IdentifyDirection(execution);
+                SetStopProfit(execution);
+            }
+            if (IsProfitTargetOneFilled(execution))
+            {
+                if (BreakEvenIsOn)
+                    BreakEven(execution);
+            }
+        }
+
+        #region Breaking Even Module Methods
+        private void BreakEven(Execution execution)
+        {
+            CancelOrder(_stopOrder);
+
+            if (execution.Order.Name == ProfitLong1)
+            {
+                _stopOrder = ExitLongStopMarket(0, true, (int)_pos2, Position.AveragePrice, BreakEvenLong, LongPos);
+            }
+
+            if (execution.Order.Name == ProfitShort1)
+            {
+                _stopOrder = ExitShortStopMarket(0, true, (int)_pos2, Position.AveragePrice, BreakEvenShort, ShortPos);
+            }
+        }
+
+        private bool IsProfitTargetOneFilled(Execution execution)
+        {
+            return execution.Order.OrderState == OrderState.Filled && IsProTargetOneOrder(execution.Order.Name);
+        }
+
+        private bool IsProTargetOneOrder(string orderName)
+        {
+            return orderName == ProfitLong1 || orderName == ProfitShort1;
+        }
+
+        private bool IsEntryOrderFilled(Execution exec)
+        {
+            return exec.Order.OrderState == OrderState.Filled && IsEntryOrder(exec.Order.Name);
+        }
+
+        private bool IsEntryOrder(string name)
+        {
+            return name == LongPos || name == ShortPos;
+        }
+
+        private void IdentifyDirection(Execution execution)
+        {
+            if (execution.Order.Name == LongPos)
+                _currentPosition = CurrentPos.Long;
+
+            if (execution.Order.Name == ShortPos)
+                _currentPosition = CurrentPos.Short;
+        }
+
+        private void SetStopProfit(Execution execution)
+        {
+            var entryPrice = execution.Order.AverageFillPrice;
+            _pos1 = Math.Round((_posSize * PositionSplitPercent / 100), 0);
+            _pos2 = _posSize - _pos1;
+
+            if (_currentPosition == CurrentPos.Long)
+            {
+                _stop = entryPrice - StopTicks * TickSize;
+                _profit1 = entryPrice + ProfitOneTicks * TickSize;
+                _profit2 = entryPrice + ProfitTwoTicks * TickSize;
+
+                _profitOrder1 = ExitLongLimit(0, true, (int)_pos1, _profit1, ProfitLong1, LongPos);
+                _profitOrder2 = ExitLongLimit(0, true, (int)_pos2, _profit2, ProfitLong2, LongPos);
+                _stopOrder = ExitLongStopMarket(0, true, _posSize, _stop, StopLong, LongPos);
+            }
+            else if (_currentPosition == CurrentPos.Short)
+            {
+                _stop = entryPrice + StopTicks * TickSize;
+                _profit1 = entryPrice - ProfitOneTicks * TickSize;
+                _profit2 = entryPrice - ProfitTwoTicks * TickSize;
+
+                _profitOrder1 = ExitShortLimit(0, true, (int)_pos1, _profit1, ProfitShort1, ShortPos);
+                _profitOrder2 = ExitShortLimit(0, true, (int)_pos2, _profit2, ProfitShort2, ShortPos);
+                _stopOrder = ExitShortStopMarket(0, true, _posSize, _stop, StopShort, ShortPos);
+            }
+        }
+		#endregion
+		// ############################################################################################################### //
+		// ############################################################################################################### //
 		
 		private bool IsInTradingPeriod(DateTime time)
 		{
-			TimeSpan currentTime = time.TimeOfDay;
-			return (currentTime >= Period1Start.TimeOfDay && currentTime <= Period1End.TimeOfDay) ||
-				(currentTime >= Period2Start.TimeOfDay && currentTime <= Period2End.TimeOfDay);
+			//
+			// Obtenir la session de trading actuelle
+			var tradingDay = sessionIterator.GetTradingDay(time);
+			
+			// Construire les dates/heures complètes pour les périodes de trading
+			var period1StartTime = tradingDay.Date + Period1Start.TimeOfDay;
+			var period1EndTime = tradingDay.Date + Period1End.TimeOfDay;
+			var period2StartTime = tradingDay.Date + Period2Start.TimeOfDay;
+			var period2EndTime = tradingDay.Date + Period2End.TimeOfDay;
+			
+			// Gérer le cas où la période se termine le jour suivant
+			if (Period1End.TimeOfDay < Period1Start.TimeOfDay)
+				period1EndTime = period1EndTime.AddDays(1);
+			if (Period2End.TimeOfDay < Period2Start.TimeOfDay)
+				period2EndTime = period2EndTime.AddDays(1);
+			
+			// Vérifier si le temps actuel est dans l'une des périodes de trading
+			bool inPeriod1 = time >= period1StartTime && time <= period1EndTime;
+			bool inPeriod2 = time >= period2StartTime && time <= period2EndTime;
+			
+			return inPeriod1 || inPeriod2;
 		}
 		
 		// Ajouter une nouvelle fonction de vérification des positions
@@ -505,9 +664,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			double lowerLevelWithOffset = previousSessionVALowerLevel - (ValueAreaOffsetTicks * TickSize);
 		
 			return Close[0] <= upperLevelWithOffset && Close[0] >= lowerLevelWithOffset;
-			// if (!BlockSignalsInPreviousValueArea || previousSessionVAUpperLevel == double.MinValue || previousSessionVALowerLevel == double.MaxValue)
-				// return false;
-			// return Close[0] <= previousSessionVAUpperLevel && Close[0] >= previousSessionVALowerLevel;
 		}
 
 		// ############################################################################################################### //
@@ -931,6 +1087,32 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		// ############################################################################# //
 		
 		#region Properties
+		
+		[NinjaScriptProperty]
+        [Display(Name = "Position Size", GroupName = "Position Management", Order = 0)]
+        public int PosSize { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Position Split %", GroupName = "Position Management", Order = 1)]
+        public double PositionSplitPercent { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Stop Ticks", GroupName = "Exit Module", Order = 1)]
+        public double StopTicks { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Profit Ticks", GroupName = "Exit Module", Order = 2)]
+        public double ProfitOneTicks { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Profit Ticks 2", GroupName = "Exit Module", Order = 3)]
+        public double ProfitTwoTicks { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Break Even", GroupName = "Exit Module", Order = 4)]
+        public bool BreakEvenIsOn { get; set; }
+		
+		// ############ //
 		[NinjaScriptProperty]
 		[PropertyEditor("NinjaTrader.Gui.Tools.TimeEditorKey")]
 		[Display(Name="Période 1 - Début", Order=1, GroupName="0.01_Time_Parameters")]
