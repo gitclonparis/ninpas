@@ -24,7 +24,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 
 namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
-    public class S202501TestVolOptionEtTrilingVA : Strategy
+    public class S202501TestVolOptionEtTrilingVAV2 : Strategy
     {
 		// Breaking Even Module Constants
         private const string LongPos = "Open Long";
@@ -120,7 +120,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             if (State == State.SetDefaults)
             {
                 Description = @"Indicateur BVA-Limusine combiné";
-                Name = "S202501TestVolOptionEtTrilingVA";
+                Name = "S202501TestVolOptionEtTrilingVAV2";
                 Calculate = Calculate.OnEachTick;
                 IsOverlay = true;
                 DisplayInDataBox = true;
@@ -270,7 +270,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				BreakEvenOffsetMultiplierVA = 0.5;
 				
 				UseTrailingStopVA = false;
-				UseSTD05ForTrailing = false;
 				TrailingStopOffsetTicks = 2;
 				TrailingStopMinBars = 0;
             }
@@ -527,9 +526,23 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			// Appliquer le trailing stop uniquement pendant la période d'analyse
 			if (UseTrailingStopVA && isWithinVolumeAnalysisPeriod && Position.MarketPosition != MarketPosition.Flat)
 			{
-				double trailingLevel = UseSTD05ForTrailing ? 
-					(Position.MarketPosition == MarketPosition.Long ? Values[1][0] : Values[2][0]) : // STD05
-					(Position.MarketPosition == MarketPosition.Long ? Values[3][0] : Values[4][0]);  // STD1
+				double trailingLevel;
+				
+				switch (SelectedTrailingStopType)
+				{
+					case TrailingStopType.STD05:
+						trailingLevel = Position.MarketPosition == MarketPosition.Long ? Values[1][0] : Values[2][0];
+						break;
+					case TrailingStopType.STD1:
+						trailingLevel = Position.MarketPosition == MarketPosition.Long ? Values[3][0] : Values[4][0];
+						break;
+					case TrailingStopType.VWAP:
+						trailingLevel = Values[0][0]; // VWAP
+						break;
+					default:
+						trailingLevel = Position.MarketPosition == MarketPosition.Long ? Values[3][0] : Values[4][0];
+						break;
+				}
 				
 				if (Position.MarketPosition == MarketPosition.Long)
 				{
@@ -550,6 +563,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 					}
 				}
 			}
+			
+			
 			// ####################################### //
             
             // Réinitialiser figVAPointsDrawn lors d'un reset
@@ -673,7 +688,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		// Modification de BreakEven pour inclure la logique VA
 		private void BreakEven(Execution execution)
 		{
-			CancelOrder(_stopOrder);
+			// CancelOrder(_stopOrder);
 			
 			double breakEvenOffset = UseVaStopTarget ? 
 				_vaRef * BreakEvenOffsetMultiplierVA :
@@ -2186,13 +2201,22 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Display(Name = "Break Even Offset Multiplier VA", GroupName = "0.04_VA Stop Target Module", Order = 8)]
 		public double BreakEvenOffsetMultiplierVA { get; set; }
 		
+		
+		
 		[NinjaScriptProperty]
-		[Display(Name = "Use Trailing Stop VA", Description = "Enable Trailing Stop based on STD levels", Order = 9, GroupName = "0.04_VA Stop Target Module")]
+		[Display(Name = "Use Trailing Stop VA", Description = "Enable Trailing Stop", Order = 9, GroupName = "0.04_VA Stop Target Module")]
 		public bool UseTrailingStopVA { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name = "Use STD05 for Trailing", Description = "Use STD05 instead of STD1 for trailing stop", Order = 10, GroupName = "0.04_VA Stop Target Module")]
-		public bool UseSTD05ForTrailing { get; set; }
+		[Display(Name = "Trailing Stop Type", Description = "Select the type of trailing stop", Order = 10, GroupName = "0.04_VA Stop Target Module")]
+		public TrailingStopType SelectedTrailingStopType { get; set; }
+		
+		public enum TrailingStopType
+		{
+			STD1,   // Standard Deviation 1
+			STD05,  // Standard Deviation 0.5
+			VWAP    // VWAP
+		}
 		
 		[NinjaScriptProperty]
 		[Range(0, int.MaxValue)]

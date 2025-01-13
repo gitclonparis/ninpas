@@ -24,7 +24,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 
 namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
-    public class S202501TestVolOptionEtTrilingVA : Strategy
+    public class S202501V0003 : Strategy
     {
 		// Breaking Even Module Constants
         private const string LongPos = "Open Long";
@@ -60,7 +60,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
         
         private VOL VOL1;
         private VOLMA VOLMA1;
-		private double volumeMaxS;					
 		
         // Variables for tracking STD3 highs and lows
         private double highestSTD3Upper;
@@ -107,20 +106,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		private bool dynamicAreaPointsDrawn;
 		private OrderFlowCumulativeDelta[] deltaIndicators;
 		private OrderFlowCumulativeDelta cumulativeDelta;
-		
-		// Nouvelles variables privées
-		private double _vaRef;
-		private int _currentPosSize;
-		private double _currentPosSplitPercent;
-		private bool _currentBreakEvenIsOn;
-		private double _currentBreakEvenOffset;
-		
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
             {
                 Description = @"Indicateur BVA-Limusine combiné";
-                Name = "S202501TestVolOptionEtTrilingVA";
+                Name = "S202501V0003";
                 Calculate = Calculate.OnEachTick;
                 IsOverlay = true;
                 DisplayInDataBox = true;
@@ -159,8 +150,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				ValueAreaOffsetTicks = 0;
 				UsePrevBarInVA = false;
                 FperiodVol = 9;
-				UseVolumeS = false;
-				EnableVolumeAnalysisPeriod = false;	   
 
                 // Paramètres Limusine
 				ActiveBuy = true;
@@ -259,20 +248,17 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				EnableDeltaRangeSessioDown = false;
 				DeltaSessionBarsToCheck = 3;
 				
-				// VA Stop Target Module defaults
-				UseVaStopTarget = false;
-				PosSizeVA = 10;
-				PositionSplitPercentVA = 50;
-				StopMultiplierVA = 1.0;
-				ProfitOneMultiplierVA = 1.0;
-				ProfitTwoMultiplierVA = 1.5;
-				BreakEvenIsOnVA = false;
-				BreakEvenOffsetMultiplierVA = 0.5;
+				EnableDynamicTargetModule = false;
+				Target1Multiplier = 1.0;
+				Target2Multiplier = 2.0;
+				StopLossMultiplier = 0.5;
+				DynamicBEOffsetTicks = 5;
 				
-				UseTrailingStopVA = false;
-				UseSTD05ForTrailing = false;
-				TrailingStopOffsetTicks = 2;
-				TrailingStopMinBars = 0;
+				 // Valeurs par défaut pour le trailing stop
+				EnableTrailingStop = false;
+				TrailingStopPeriod = 40;
+				TrailingStopMultiplier = 1.5;
+				SelectedTrailingStopType = TrilingType.Atr;
             }
             else if (State == State.Configure)
             {
@@ -290,7 +276,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 					{
 						deltaIndicators = new OrderFlowCumulativeDelta[4];
 					}
-				}										   
+				}
+				
+				if (EnableTrailingStop)
+				{
+					AddChartIndicator(TrilingStopSmooth(TrailingStopPeriod, TrailingStopMultiplier, SelectedTrailingStopType));
+				}
             }
             else if (State == State.DataLoaded)
             {
@@ -318,7 +309,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
         protected override void OnBarUpdate()
         {
-            if (CurrentBars[0] < 20)
+            if (CurrentBars[0] < 50)
                 return;
 			if (BarsInProgress != 0) return;
 			
@@ -327,8 +318,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				cumulativeDelta.Update(cumulativeDelta.BarsArray[1].Count - 1, 1);
 				return;
 			}
-			
-			
 			
 			// bool isInTradingPeriod = IsInTradingPeriod(Time[0]);
 			// if (ClosePositionsOutsideHours && !isInTradingPeriod)
@@ -355,6 +344,23 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                     ExitShort();
                 return;
             }
+			
+			 if (Position.MarketPosition != MarketPosition.Flat)
+			{
+				if (EnableTrailingStop)
+				{
+					manageTheTrade();
+				}
+				else
+				{
+					// Gestion normale des positions existantes
+					if (EnableDynamicTargetModule)
+						SetDynamicStopProfit(null);
+					else
+						SetStopProfit(null);
+				}
+				return;
+			}
 			
 			figVA = ResetPeriod - 1;
             DateTime currentBarTime = Time[0];
@@ -500,103 +506,20 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				previousSessionDynamicLowerLevel = dynamicLowerLevel;
 				dynamicAreaPointsDrawn = true;
 			}
-			
-			// ####################################### //
-			bool isWithinVolumeAnalysisPeriod;
-			// TimeSpan timeSinceReset = Time[0] - lastResetTime;
-			
-			if (SignalTimingMode == SignalTimeMode.Minutes)
-			{
-				isWithinVolumeAnalysisPeriod = timeSinceReset.TotalMinutes >= MinMinutesForSignal + TrailingStopMinBars && 
-										timeSinceReset.TotalMinutes <= MaxMinutesForSignal;
-			}
-			else
-			{
-				isWithinVolumeAnalysisPeriod = barsSinceReset >= MinBarsForSignal + TrailingStopMinBars && 
-										barsSinceReset <= MaxBarsForSignal;
-			}
-			
-			if (!EnableVolumeAnalysisPeriod || isWithinVolumeAnalysisPeriod)
-			{
-				if (Volume[0] > volumeMaxS)
-				{
-					volumeMaxS = Volume[0];
-				}
-			}
-			
-			// Appliquer le trailing stop uniquement pendant la période d'analyse
-			if (UseTrailingStopVA && isWithinVolumeAnalysisPeriod && Position.MarketPosition != MarketPosition.Flat)
-			{
-				double trailingLevel = UseSTD05ForTrailing ? 
-					(Position.MarketPosition == MarketPosition.Long ? Values[1][0] : Values[2][0]) : // STD05
-					(Position.MarketPosition == MarketPosition.Long ? Values[3][0] : Values[4][0]);  // STD1
-				
-				if (Position.MarketPosition == MarketPosition.Long)
-				{
-					double exitPrice = trailingLevel - (TrailingStopOffsetTicks * TickSize);
-					if (Close[0] < exitPrice)
-					{
-						ExitLong();
-						Draw.Dot(this, "TrailingExit" + CurrentBar, true, 0, High[0] + 2 * TickSize, Brushes.Yellow);
-					}
-				}
-				else if (Position.MarketPosition == MarketPosition.Short)
-				{
-					double exitPrice = trailingLevel + (TrailingStopOffsetTicks * TickSize);
-					if (Close[0] > exitPrice)
-					{
-						ExitShort();
-						Draw.Dot(this, "TrailingExit" + CurrentBar, true, 0, Low[0] - 2 * TickSize, Brushes.Yellow);
-					}
-				}
-			}
-			// ####################################### //
             
             // Réinitialiser figVAPointsDrawn lors d'un reset
             if (shouldReset)
             {
                 figVAPointsDrawn = false;
             }
-			
-			
 
 			// if (isInTradingPeriod && !HasExistingPositions())
-			// if (isInTradingPeriod && Position.MarketPosition == MarketPosition.Flat)
-			// {
-				
-				// if (ActiveBuy && ShouldDrawUpArrow())
-				// {
-					// EnterLong(PosSize, LongPos);
-					// Draw.ArrowUp(this, "UpArrow" + CurrentBar, true, 0, Low[0] - 2 * TickSize, Brushes.Green);
-					// upperBreakoutCount++;
-					// var (redDotPrice, blueDotPrice) = CalculateDotLevels(true, Close[0]);
-					// Draw.Dot(this, "RedDotUp" + CurrentBar, true, 0, redDotPrice, Brushes.Red);
-					// Draw.Dot(this, "BlueDotUp" + CurrentBar, true, 0, blueDotPrice, Brushes.Blue);
-					// Draw.Dot(this, "WhiteDotUp" + CurrentBar, true, 0, Close[0], Brushes.White);
-				// }
-				// else if (ActiveSell && ShouldDrawDownArrow())
-				// {
-					// EnterShort(PosSize, ShortPos);
-					// Draw.ArrowDown(this, "DownArrow" + CurrentBar, true, 0, High[0] + 2 * TickSize, Brushes.Red);
-					// lowerBreakoutCount++;
-					// var (redDotPrice, blueDotPrice) = CalculateDotLevels(false, Close[0]);
-					// Draw.Dot(this, "RedDotDown" + CurrentBar, true, 0, redDotPrice, Brushes.Red);
-					// Draw.Dot(this, "BlueDotDown" + CurrentBar, true, 0, blueDotPrice, Brushes.Blue);
-					// Draw.Dot(this, "WhiteDotDown" + CurrentBar, true, 0, Close[0], Brushes.White);
-				// }
-			// }
-			
-			//
 			if (isInTradingPeriod && Position.MarketPosition == MarketPosition.Flat)
 			{
-				_vaRef = CalculateVaRef();
-				_currentPosSize = UseVaStopTarget ? PosSizeVA : PosSize;
-				_currentPosSplitPercent = UseVaStopTarget ? PositionSplitPercentVA : PositionSplitPercent;
-				_currentBreakEvenIsOn = UseVaStopTarget ? BreakEvenIsOnVA : BreakEvenIsOn;
-				
+				//
 				if (ActiveBuy && ShouldDrawUpArrow())
 				{
-					EnterLong(_currentPosSize, LongPos);
+					EnterLong(PosSize, LongPos);
 					Draw.ArrowUp(this, "UpArrow" + CurrentBar, true, 0, Low[0] - 2 * TickSize, Brushes.Green);
 					upperBreakoutCount++;
 					var (redDotPrice, blueDotPrice) = CalculateDotLevels(true, Close[0]);
@@ -606,7 +529,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				}
 				else if (ActiveSell && ShouldDrawDownArrow())
 				{
-					EnterShort(_currentPosSize, ShortPos);
+					EnterShort(PosSize, ShortPos);
 					Draw.ArrowDown(this, "DownArrow" + CurrentBar, true, 0, High[0] + 2 * TickSize, Brushes.Red);
 					lowerBreakoutCount++;
 					var (redDotPrice, blueDotPrice) = CalculateDotLevels(false, Close[0]);
@@ -615,84 +538,187 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 					Draw.Dot(this, "WhiteDotDown" + CurrentBar, true, 0, Close[0], Brushes.White);
 				}
 			}
-			
         }
 		// ############################################################################################################### //
-		// Nouvelle méthode pour calculer VaRef
-		private double CalculateVaRef()
+		// ############################## Dynamic Target Module Addition ################################### //
+		//
+		// Add this TypeConverter class
+		public class DynamicMultiplierConverter : TypeConverter
 		{
-			return Math.Abs(Values[3][0] - Values[4][0]); // STD1Upper - STD1Lower
+			public override bool GetStandardValuesSupported(ITypeDescriptorContext context)
+			{
+				return true;
+			}
+		
+			public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext context)
+			{
+				 return new StandardValuesCollection(new double[] 
+				{ 
+					0.25, 0.5, 0.75,
+					1.0, 1.25, 1.5, 1.75,
+					2.0, 2.25, 2.5, 2.75,
+					3.0, 3.25, 3.5, 3.75,
+					4.0, 4.25, 4.5, 4.75,
+					5.0, 5.5, 6.0, 6.5,
+					7.0, 7.5, 8.0, 8.5,
+					9.0, 9.5, 10.0
+				});
+			}
+		
+			public override bool GetStandardValuesExclusive(ITypeDescriptorContext context)
+			{
+				return true;
+			}
 		}
 		
+		//
+		// Add these methods to handle dynamic target calculation
+		private void SetDynamicStopProfit(Execution execution)
+		{
+			if (!EnableDynamicTargetModule)
+				return;
 		
+			var entryPrice = execution.Order.AverageFillPrice;
+			_pos1 = Math.Round((_posSize * PositionSplitPercent / 100), 0);
+			_pos2 = _posSize - _pos1;
+		
+			// Calculate STD1 range
+			double std1Range = Math.Abs(Values[3][0] - Values[4][0]); // STD1Upper - STD1Lower
+		
+			if (_currentPosition == CurrentPos.Long)
+			{
+				// Calculate and round targets/stop
+				double target1Distance = Math.Floor(std1Range * Target1Multiplier / TickSize) * TickSize;
+				double target2Distance = Math.Floor(std1Range * Target2Multiplier / TickSize) * TickSize;
+				double stopDistance = Math.Floor(std1Range * StopLossMultiplier / TickSize) * TickSize;
+		
+				_stop = entryPrice - stopDistance;
+				_profit1 = entryPrice + target1Distance;
+				_profit2 = entryPrice + target2Distance;
+		
+				_profitOrder1 = ExitLongLimit(0, true, (int)_pos1, _profit1, ProfitLong1, LongPos);
+				_profitOrder2 = ExitLongLimit(0, true, (int)_pos2, _profit2, ProfitLong2, LongPos);
+				_stopOrder = ExitLongStopMarket(0, true, _posSize, _stop, StopLong, LongPos);
+				
+				Print($"LONG Entry - Price: {entryPrice}, STD1 Range: {std1Range}");
+				Print($"Target 1: {_profit1} (Distance: {target1Distance})");
+				Print($"Target 2: {_profit2} (Distance: {target2Distance})");
+				Print($"Stop: {_stop} (Distance: {stopDistance})");
+			}
+			else if (_currentPosition == CurrentPos.Short)
+			{
+				// Calculate and round targets/stop
+				double target1Distance = Math.Floor(std1Range * Target1Multiplier / TickSize) * TickSize;
+				double target2Distance = Math.Floor(std1Range * Target2Multiplier / TickSize) * TickSize;
+				double stopDistance = Math.Floor(std1Range * StopLossMultiplier / TickSize) * TickSize;
+		
+				_stop = entryPrice + stopDistance;
+				_profit1 = entryPrice - target1Distance;
+				_profit2 = entryPrice - target2Distance;
+		
+				_profitOrder1 = ExitShortLimit(0, true, (int)_pos1, _profit1, ProfitShort1, ShortPos);
+				_profitOrder2 = ExitShortLimit(0, true, (int)_pos2, _profit2, ProfitShort2, ShortPos);
+				_stopOrder = ExitShortStopMarket(0, true, _posSize, _stop, StopShort, ShortPos);
+				
+				Print($"SHORT Entry - Price: {entryPrice}, STD1 Range: {std1Range}");
+				Print($"Target 1: {_profit1} (Distance: {target1Distance})");
+				Print($"Target 2: {_profit2} (Distance: {target2Distance})");
+				Print($"Stop: {_stop} (Distance: {stopDistance})");
+			}
+		}
+		
+		// ################################### Dynamic Target Module Addition ############################################ //
 		// ############################################################################################################### //
-		protected override void OnExecutionUpdate(Execution execution, string executionId, double price, int quantity,
-            MarketPosition marketPosition, string orderId, DateTime time)
-        {
-            if (IsEntryOrderFilled(execution))
-            {
-                IdentifyDirection(execution);
-                SetStopProfit(execution);
-            }
-            if (IsProfitTargetOneFilled(execution))
-            {
-                if (BreakEvenIsOn)
-                    BreakEven(execution);
-            }
-        }
-
-        #region Breaking Even Module Methods
-        // private void BreakEven(Execution execution)
+		// protected override void OnExecutionUpdate(Execution execution, string executionId, double price, int quantity,
+            // MarketPosition marketPosition, string orderId, DateTime time)
         // {
-            // CancelOrder(_stopOrder);
-
-            // if (execution.Order.Name == ProfitLong1)
+            // if (IsEntryOrderFilled(execution))
             // {
-				// double breakEvenPrice = Position.AveragePrice + (BreakEvenOffsetTicks * TickSize);
-				// breakEvenPrice = RoundToTickSize(breakEvenPrice);
-				// _stopOrder = ExitLongStopMarket(0, true, (int)_pos2, breakEvenPrice, BreakEvenLong, LongPos);
-				// Print($"LONG - Time: {Time[0]}, Position.AveragePrice: {Position.AveragePrice}, Initial BE Price: {breakEvenPrice}");
-				// Print($"LONG - Bar Range - High: {High[0]}, Low: {Low[0]}, Close: {Close[0]}");
-				// Print($"LONG - Stop Order Placed - Final Price: {breakEvenPrice}, OrderId: {_stopOrder?.OrderId}");
-               // _stopOrder = ExitLongStopMarket(0, true, (int)_pos2, Position.AveragePrice, BreakEvenLong, LongPos);
+                // IdentifyDirection(execution);
+                // SetStopProfit(execution);
             // }
-
-            // if (execution.Order.Name == ProfitShort1)
+            // if (IsProfitTargetOneFilled(execution))
             // {
-				// double breakEvenPrice = Position.AveragePrice - (BreakEvenOffsetTicks * TickSize);
-				// breakEvenPrice = RoundToTickSize(breakEvenPrice);
-                // _stopOrder = ExitShortStopMarket(0, true, (int)_pos2, breakEvenPrice, BreakEvenShort, ShortPos);
-				// Print($"SHORT - Time: {Time[0]}, Position.AveragePrice: {Position.AveragePrice}, Initial BE Price: {breakEvenPrice}");
-				// Print($"SHORT - Bar Range - High: {High[0]}, Low: {Low[0]}, Close: {Close[0]}");
-				// Print($"SHORT - Stop Order Placed - Final Price: {breakEvenPrice}, OrderId: {_stopOrder?.OrderId}");
-                // _stopOrder = ExitShortStopMarket(0, true, (int)_pos2, Position.AveragePrice, BreakEvenShort, ShortPos);
+                // if (BreakEvenIsOn)
+                    // BreakEven(execution);
             // }
         // }
 		
 		//
-		// Modification de BreakEven pour inclure la logique VA
-		private void BreakEven(Execution execution)
+		// Modify the OnExecutionUpdate method
+		protected override void OnExecutionUpdate(Execution execution, string executionId, double price, int quantity,
+			MarketPosition marketPosition, string orderId, DateTime time)
+		{
+			if (IsEntryOrderFilled(execution))
+			{
+				IdentifyDirection(execution);
+				if (EnableDynamicTargetModule)
+					SetDynamicStopProfit(execution);
+				else
+					SetStopProfit(execution);
+			}
+			if (IsProfitTargetOneFilled(execution))
+			{
+				if (BreakEvenIsOn)
+				{
+					if (EnableDynamicTargetModule)
+						DynamicBreakEven(execution);
+					else
+						BreakEven(execution);
+				}
+			}
+		}
+		
+		// Add this new method for dynamic break even
+		private void DynamicBreakEven(Execution execution)
 		{
 			CancelOrder(_stopOrder);
-			
-			double breakEvenOffset = UseVaStopTarget ? 
-				_vaRef * BreakEvenOffsetMultiplierVA :
-				BreakEvenOffsetTicks * TickSize;
 		
 			if (execution.Order.Name == ProfitLong1)
 			{
-				double breakEvenPrice = Position.AveragePrice + breakEvenOffset;
+				double breakEvenPrice = Position.AveragePrice + (DynamicBEOffsetTicks * TickSize);
 				breakEvenPrice = RoundToTickSize(breakEvenPrice);
 				_stopOrder = ExitLongStopMarket(0, true, (int)_pos2, breakEvenPrice, BreakEvenLong, LongPos);
+				Print($"LONG Dynamic BE - Entry: {Position.AveragePrice}, BE Price: {breakEvenPrice}");
 			}
 		
 			if (execution.Order.Name == ProfitShort1)
 			{
-				double breakEvenPrice = Position.AveragePrice - breakEvenOffset;
+				double breakEvenPrice = Position.AveragePrice - (DynamicBEOffsetTicks * TickSize);
 				breakEvenPrice = RoundToTickSize(breakEvenPrice);
 				_stopOrder = ExitShortStopMarket(0, true, (int)_pos2, breakEvenPrice, BreakEvenShort, ShortPos);
+				Print($"SHORT Dynamic BE - Entry: {Position.AveragePrice}, BE Price: {breakEvenPrice}");
 			}
 		}
+		// ############################## Dynamic Target Module Addition ####################################################### //
+
+        #region Breaking Even Module Methods
+        private void BreakEven(Execution execution)
+        {
+            CancelOrder(_stopOrder);
+
+            if (execution.Order.Name == ProfitLong1)
+            {
+				double breakEvenPrice = Position.AveragePrice + (BreakEvenOffsetTicks * TickSize);
+				breakEvenPrice = RoundToTickSize(breakEvenPrice);
+				_stopOrder = ExitLongStopMarket(0, true, (int)_pos2, breakEvenPrice, BreakEvenLong, LongPos);
+				Print($"LONG - Time: {Time[0]}, Position.AveragePrice: {Position.AveragePrice}, Initial BE Price: {breakEvenPrice}");
+				Print($"LONG - Bar Range - High: {High[0]}, Low: {Low[0]}, Close: {Close[0]}");
+				Print($"LONG - Stop Order Placed - Final Price: {breakEvenPrice}, OrderId: {_stopOrder?.OrderId}");
+                // _stopOrder = ExitLongStopMarket(0, true, (int)_pos2, Position.AveragePrice, BreakEvenLong, LongPos);
+            }
+
+            if (execution.Order.Name == ProfitShort1)
+            {
+				double breakEvenPrice = Position.AveragePrice - (BreakEvenOffsetTicks * TickSize);
+				breakEvenPrice = RoundToTickSize(breakEvenPrice);
+                _stopOrder = ExitShortStopMarket(0, true, (int)_pos2, breakEvenPrice, BreakEvenShort, ShortPos);
+				Print($"SHORT - Time: {Time[0]}, Position.AveragePrice: {Position.AveragePrice}, Initial BE Price: {breakEvenPrice}");
+				Print($"SHORT - Bar Range - High: {High[0]}, Low: {Low[0]}, Close: {Close[0]}");
+				Print($"SHORT - Stop Order Placed - Final Price: {breakEvenPrice}, OrderId: {_stopOrder?.OrderId}");
+                // _stopOrder = ExitShortStopMarket(0, true, (int)_pos2, Position.AveragePrice, BreakEvenShort, ShortPos);
+            }
+        }
 		
 		//
 		
@@ -725,87 +751,33 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 _currentPosition = CurrentPos.Short;
         }
 
-        // private void SetStopProfit(Execution execution)
-        // {
-            // var entryPrice = execution.Order.AverageFillPrice;
-            // _pos1 = Math.Round((_posSize * PositionSplitPercent / 100), 0);
-            // _pos2 = _posSize - _pos1;
+        private void SetStopProfit(Execution execution)
+        {
+            var entryPrice = execution.Order.AverageFillPrice;
+            _pos1 = Math.Round((_posSize * PositionSplitPercent / 100), 0);
+            _pos2 = _posSize - _pos1;
 
-            // if (_currentPosition == CurrentPos.Long)
-            // {
-                // _stop = entryPrice - StopTicks * TickSize;
-                // _profit1 = entryPrice + ProfitOneTicks * TickSize;
-                // _profit2 = entryPrice + ProfitTwoTicks * TickSize;
+            if (_currentPosition == CurrentPos.Long)
+            {
+                _stop = entryPrice - StopTicks * TickSize;
+                _profit1 = entryPrice + ProfitOneTicks * TickSize;
+                _profit2 = entryPrice + ProfitTwoTicks * TickSize;
 
-                // _profitOrder1 = ExitLongLimit(0, true, (int)_pos1, _profit1, ProfitLong1, LongPos);
-                // _profitOrder2 = ExitLongLimit(0, true, (int)_pos2, _profit2, ProfitLong2, LongPos);
-                // _stopOrder = ExitLongStopMarket(0, true, _posSize, _stop, StopLong, LongPos);
-            // }
-            // else if (_currentPosition == CurrentPos.Short)
-            // {
-                // _stop = entryPrice + StopTicks * TickSize;
-                // _profit1 = entryPrice - ProfitOneTicks * TickSize;
-                // _profit2 = entryPrice - ProfitTwoTicks * TickSize;
+                _profitOrder1 = ExitLongLimit(0, true, (int)_pos1, _profit1, ProfitLong1, LongPos);
+                _profitOrder2 = ExitLongLimit(0, true, (int)_pos2, _profit2, ProfitLong2, LongPos);
+                _stopOrder = ExitLongStopMarket(0, true, _posSize, _stop, StopLong, LongPos);
+            }
+            else if (_currentPosition == CurrentPos.Short)
+            {
+                _stop = entryPrice + StopTicks * TickSize;
+                _profit1 = entryPrice - ProfitOneTicks * TickSize;
+                _profit2 = entryPrice - ProfitTwoTicks * TickSize;
 
-                // _profitOrder1 = ExitShortLimit(0, true, (int)_pos1, _profit1, ProfitShort1, ShortPos);
-                // _profitOrder2 = ExitShortLimit(0, true, (int)_pos2, _profit2, ProfitShort2, ShortPos);
-                // _stopOrder = ExitShortStopMarket(0, true, _posSize, _stop, StopShort, ShortPos);
-            // }
-        // }
-		
-		//
-		// Modification de SetStopProfit pour inclure la logique VA
-		private void SetStopProfit(Execution execution)
-		{
-			var entryPrice = execution.Order.AverageFillPrice;
-			_pos1 = Math.Round((_currentPosSize * _currentPosSplitPercent / 100), 0);
-			_pos2 = _currentPosSize - _pos1;
-		
-			if (UseVaStopTarget)
-			{
-				if (_currentPosition == CurrentPos.Long)
-				{
-					_stop = entryPrice - (_vaRef * StopMultiplierVA);
-					_profit1 = entryPrice + (_vaRef * ProfitOneMultiplierVA);
-					_profit2 = entryPrice + (_vaRef * ProfitTwoMultiplierVA);
-				}
-				else if (_currentPosition == CurrentPos.Short)
-				{
-					_stop = entryPrice + (_vaRef * StopMultiplierVA);
-					_profit1 = entryPrice - (_vaRef * ProfitOneMultiplierVA);
-					_profit2 = entryPrice - (_vaRef * ProfitTwoMultiplierVA);
-				}
-			}
-			else
-			{
-				// Original logic
-				if (_currentPosition == CurrentPos.Long)
-				{
-					_stop = entryPrice - StopTicks * TickSize;
-					_profit1 = entryPrice + ProfitOneTicks * TickSize;
-					_profit2 = entryPrice + ProfitTwoTicks * TickSize;
-				}
-				else if (_currentPosition == CurrentPos.Short)
-				{
-					_stop = entryPrice + StopTicks * TickSize;
-					_profit1 = entryPrice - ProfitOneTicks * TickSize;
-					_profit2 = entryPrice - ProfitTwoTicks * TickSize;
-				}
-			}
-		
-			if (_currentPosition == CurrentPos.Long)
-			{
-				_profitOrder1 = ExitLongLimit(0, true, (int)_pos1, _profit1, ProfitLong1, LongPos);
-				_profitOrder2 = ExitLongLimit(0, true, (int)_pos2, _profit2, ProfitLong2, LongPos);
-				_stopOrder = ExitLongStopMarket(0, true, _currentPosSize, _stop, StopLong, LongPos);
-			}
-			else if (_currentPosition == CurrentPos.Short)
-			{
-				_profitOrder1 = ExitShortLimit(0, true, (int)_pos1, _profit1, ProfitShort1, ShortPos);
-				_profitOrder2 = ExitShortLimit(0, true, (int)_pos2, _profit2, ProfitShort2, ShortPos);
-				_stopOrder = ExitShortStopMarket(0, true, _currentPosSize, _stop, StopShort, ShortPos);
-			}
-		}
+                _profitOrder1 = ExitShortLimit(0, true, (int)_pos1, _profit1, ProfitShort1, ShortPos);
+                _profitOrder2 = ExitShortLimit(0, true, (int)_pos2, _profit2, ProfitShort2, ShortPos);
+                _stopOrder = ExitShortStopMarket(0, true, _posSize, _stop, StopShort, ShortPos);
+            }
+        }
 		
 		// protected override void OnOrderTrace(DateTime timestamp, string message)
         // {
@@ -1144,6 +1116,24 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		}
 		
 		// ############################# 3.03_Delta Range Module ########################################################### //
+		
+		private void manageTheTrade()
+		{
+			double stop_long = TrilingStopSmooth(TrailingStopPeriod, TrailingStopMultiplier, SelectedTrailingStopType).TrilingForLong[0];
+			double stop_short = TrilingStopSmooth(TrailingStopPeriod, TrailingStopMultiplier, SelectedTrailingStopType).TrilingForShort[0];
+			double close = Close[0];
+		
+			if (Position.MarketPosition == MarketPosition.Long)
+			{
+				if (close < stop_long)
+					ExitLong();
+			}
+			else if (Position.MarketPosition == MarketPosition.Short)
+			{
+				if (close > stop_short)
+					ExitShort();
+			}
+		}
 						
 		// ############################################################################################################### //
 
@@ -1258,7 +1248,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
             bool bvaCondition = (Close[0] > Open[0]) &&
                 (!OKisVOL || (VOL1[0] > VOLMA1[0])) &&
-				(!UseVolumeS || Volume[0] >= volumeMaxS) &&								
                 (!OKisAfterBarsSinceResetUP || withinSignalTime) &&
 				(!OKisAboveUpperThreshold || Close[0] > (selectedUpperLevel + MinEntryDistanceUP * TickSize)) &&
 				(!OKisWithinMaxEntryDistance || Close[0] <= (selectedUpperLevel + MaxEntryDistanceUP * TickSize)) &&
@@ -1435,7 +1424,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
             bool bvaCondition = (Close[0] < Open[0]) &&
                 (!OKisVOL || (VOL1[0] > VOLMA1[0])) &&
-				(!UseVolumeS || Volume[0] >= volumeMaxS) &&							   
                 (!OKisAfterBarsSinceResetDown || withinSignalTime) &&
 				(!OKisBelovLowerThreshold || Close[0] < (selectedLowerLevel - MinEntryDistanceDOWN * TickSize)) &&
 				(!OKisWithinMaxEntryDistanceDown || Close[0] >= (selectedLowerLevel - MaxEntryDistanceDOWN * TickSize)) &&
@@ -1524,7 +1512,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             lowestSTD3Lower = double.MaxValue;
 			
 			dynamicAreaPointsDrawn = false;					  
-			volumeMaxS = 0;	  
 			// previousVAUpperLevel = double.MinValue;
 			// previousVALowerLevel = double.MaxValue;
         }
@@ -2025,13 +2012,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
         [Range(0, 1)]
         [Display(Name = "OKisVOL", Description = "Check Volume", Order = 1, GroupName = "Volume")]
         public bool OKisVOL { get; set; }
-		[NinjaScriptProperty]
-		[Display(Name="Use Volume S", Description="Active la comparaison avec le volume maximum de la période", Order=3, GroupName="Volume")]
-		public bool UseVolumeS { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name="Enable Volume Analysis Period", Description="Active la période d'analyse du volume maximum", Order=4, GroupName="Volume")]
-		public bool EnableVolumeAnalysisPeriod { get; set; }			   
 
         [Browsable(false)]
         [XmlIgnore]
@@ -2151,59 +2131,53 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Display(Name="Bars to Check Delta", Description="Nombre de barres à vérifier pour le delta", Order=7, GroupName="3.03_Delta Range Module")]
 		public int DeltaSessionBarsToCheck { get; set; }		
 		
-		
-		
-		// Ajout des nouvelles propriétés dans la section Properties
+
+		//
 		[NinjaScriptProperty]
-		[Display(Name = "Use VA Stop Target", Description = "Use Value Area for Stop and Target calculations", Order = 1, GroupName = "0.04_VA Stop Target Module")]
-		public bool UseVaStopTarget { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name = "Position Size VA", GroupName = "0.04_VA Stop Target Module", Order = 2)]
-		public int PosSizeVA { get; set; }
+		[Display(Name = "Enable Dynamic Target Module", Description = "Enable the dynamic target and stop-loss calculation based on STD1 range", Order = 1, GroupName = "Dynamic Target Module")]
+		public bool EnableDynamicTargetModule { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name = "Position Split % VA", GroupName = "0.04_VA Stop Target Module", Order = 3)]
-		public double PositionSplitPercentVA { get; set; }
+		[Display(Name = "Target 1 Multiplier", Description = "Multiplier for Target 1 (0.5, 1, 2, or 2.5)", Order = 2, GroupName = "Dynamic Target Module")]
+		[TypeConverter(typeof(DynamicMultiplierConverter))]
+		public double Target1Multiplier { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name = "Stop Multiplier VA", GroupName = "0.04_VA Stop Target Module", Order = 4)]
-		public double StopMultiplierVA { get; set; }
+		[Display(Name = "Target 2 Multiplier", Description = "Multiplier for Target 2 (0.5, 1, 2, or 2.5)", Order = 3, GroupName = "Dynamic Target Module")]
+		[TypeConverter(typeof(DynamicMultiplierConverter))]
+		public double Target2Multiplier { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name = "Profit One Multiplier VA", GroupName = "0.04_VA Stop Target Module", Order = 5)]
-		public double ProfitOneMultiplierVA { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name = "Profit Two Multiplier VA", GroupName = "0.04_VA Stop Target Module", Order = 6)]
-		public double ProfitTwoMultiplierVA { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name = "Break Even VA", GroupName = "0.04_VA Stop Target Module", Order = 7)]
-		public bool BreakEvenIsOnVA { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name = "Break Even Offset Multiplier VA", GroupName = "0.04_VA Stop Target Module", Order = 8)]
-		public double BreakEvenOffsetMultiplierVA { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name = "Use Trailing Stop VA", Description = "Enable Trailing Stop based on STD levels", Order = 9, GroupName = "0.04_VA Stop Target Module")]
-		public bool UseTrailingStopVA { get; set; }
-		
-		[NinjaScriptProperty]
-		[Display(Name = "Use STD05 for Trailing", Description = "Use STD05 instead of STD1 for trailing stop", Order = 10, GroupName = "0.04_VA Stop Target Module")]
-		public bool UseSTD05ForTrailing { get; set; }
+		[Display(Name = "Stop Loss Multiplier", Description = "Multiplier for Stop Loss (0.5, 1.5, etc)", Order = 4, GroupName = "Dynamic Target Module")]
+		[TypeConverter(typeof(DynamicMultiplierConverter))]
+		public double StopLossMultiplier { get; set; }
 		
 		[NinjaScriptProperty]
 		[Range(0, int.MaxValue)]
-		[Display(Name = "Trailing Stop Offset Ticks", Description = "Offset in ticks for trailing stop", Order = 11, GroupName = "0.04_VA Stop Target Module")]
-		public int TrailingStopOffsetTicks { get; set; }
+		[Display(Name = "Dynamic BE Offset Ticks", Description = "Number of ticks to offset the break even price", Order = 5, GroupName = "Dynamic Target Module")]
+		public int DynamicBEOffsetTicks { get; set; }
+		
+		
+		//
 		
 		[NinjaScriptProperty]
-		[Range(0, int.MaxValue)]
-		[Display(Name = "Trailing Stop Min Bars", Description = "Minimum bars before trailing stop becomes active", Order = 12, GroupName = "0.04_VA Stop Target Module")]
-		public int TrailingStopMinBars { get; set; }
+		[Display(Name="Enable Trailing Stop", Description="Active le trailing stop pour gérer les sorties", Order=1, GroupName="Trailing Stop Parameters")]
+		public bool EnableTrailingStop { get; set; }
 		
+		[NinjaScriptProperty]
+		[Range(1, int.MaxValue)]
+		[Display(Name="Trailing Stop Period", Description="Période pour le calcul du trailing stop", Order=2, GroupName="Trailing Stop Parameters")]
+		public int TrailingStopPeriod { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0.1, 5.0)]
+		[Display(Name="Trailing Stop Multiplier", Description="Multiplicateur pour le trailing stop", Order=3, GroupName="Trailing Stop Parameters")]
+		public double TrailingStopMultiplier { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Trailing Stop Type", Description="Type de trailing stop à utiliser", Order=4, GroupName="Trailing Stop Parameters")]
+		public TrilingType SelectedTrailingStopType { get; set; }
+
         #endregion
     }
 }
