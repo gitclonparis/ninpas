@@ -161,6 +161,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 FperiodVol = 9;
 				UseVolumeS = false;
 				EnableVolumeAnalysisPeriod = false;	   
+				UseVolumeIncrease = false;
+				VolumeBarsToCompare = 1;
 
                 // Paramètres Limusine
 				ActiveBuy = true;
@@ -1161,6 +1163,26 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		// ############################# 3.03_Delta Range Module ########################################################### //
 						
 		// ############################################################################################################### //
+		// ############################################################################################################### //
+		//
+		private bool CheckVolumeIncrease()
+		{
+			if (!UseVolumeIncrease || CurrentBar < VolumeBarsToCompare)
+				return true;
+		
+			double currentVolume = Volume[0];
+			
+			// Vérifier que le volume actuel est supérieur à tous les volumes précédents
+			for (int i = 1; i <= VolumeBarsToCompare; i++)
+			{
+				if (currentVolume <= Volume[i])
+					return false;
+			}
+			
+			return true;
+		}
+		
+		// ############################################################################################################### //
 
         private bool ShouldDrawUpArrow()
         {
@@ -1273,7 +1295,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
             bool bvaCondition = (Close[0] > Open[0]) &&
                 (!OKisVOL || (VOL1[0] > VOLMA1[0])) &&
-				(!UseVolumeS || Volume[0] >= volumeMaxS) &&								
+				(!UseVolumeS || Volume[0] >= volumeMaxS) &&				
+				(!UseVolumeIncrease || CheckVolumeIncrease()) &&
                 (!OKisAfterBarsSinceResetUP || withinSignalTime) &&
 				(!OKisAboveUpperThreshold || Close[0] > (selectedUpperLevel + MinEntryDistanceUP * TickSize)) &&
 				(!OKisWithinMaxEntryDistance || Close[0] <= (selectedUpperLevel + MaxEntryDistanceUP * TickSize)) &&
@@ -1450,7 +1473,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
             bool bvaCondition = (Close[0] < Open[0]) &&
                 (!OKisVOL || (VOL1[0] > VOLMA1[0])) &&
-				(!UseVolumeS || Volume[0] >= volumeMaxS) &&							   
+				(!UseVolumeS || Volume[0] >= volumeMaxS) &&						
+				(!UseVolumeIncrease || CheckVolumeIncrease()) &&
                 (!OKisAfterBarsSinceResetDown || withinSignalTime) &&
 				(!OKisBelovLowerThreshold || Close[0] < (selectedLowerLevel - MinEntryDistanceDOWN * TickSize)) &&
 				(!OKisWithinMaxEntryDistanceDown || Close[0] >= (selectedLowerLevel - MaxEntryDistanceDOWN * TickSize)) &&
@@ -2038,7 +2062,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
         
         [NinjaScriptProperty]
         [Range(0, 1)]
-        [Display(Name = "OKisVOL", Description = "Check Volume", Order = 1, GroupName = "Volume")]
+        [Display(Name = "OKisVOL", Description = "Check Volume", Order = 2, GroupName = "Volume")]
         public bool OKisVOL { get; set; }
 		[NinjaScriptProperty]
 		[Display(Name="Use Volume S", Description="Active la comparaison avec le volume maximum de la période", Order=3, GroupName="Volume")]
@@ -2046,7 +2070,16 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		
 		[NinjaScriptProperty]
 		[Display(Name="Enable Volume Analysis Period", Description="Active la période d'analyse du volume maximum", Order=4, GroupName="Volume")]
-		public bool EnableVolumeAnalysisPeriod { get; set; }			   
+		public bool EnableVolumeAnalysisPeriod { get; set; }
+
+		[NinjaScriptProperty]
+		[Display(Name = "Use Volume Increase", Description = "Enable volume increase check", Order = 5, GroupName = "Volume")]
+		public bool UseVolumeIncrease { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Volume Bars to Compare", Description = "Number of previous bars to compare volume with", Order = 6, GroupName = "Volume")]
+		[Range(1, 10)]
+		public int VolumeBarsToCompare { get; set; }
 
         [Browsable(false)]
         [XmlIgnore]
