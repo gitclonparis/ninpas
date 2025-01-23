@@ -238,6 +238,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				BreakEvenOffsetTicks = 5;
 				BreakEvenOffsetMultiplierVA = 0.5;
 				
+				EnablePriorHiLowUpSignal = false;
+				EnablePriorHiLowDownSignal = false;
+				TicksOffsetHigh = 5;
+				TicksOffsetLow = 5;
+				BlockSignalHiLowPriorRange = false;
+				
             }
             else if (State == State.Configure)
             {
@@ -249,6 +255,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 VOL1 = VOL(Close);
                 VOLMA1 = VOLMA(Close, Convert.ToInt32(FperiodVol));
 				sessionIterator = new SessionIterator(Bars);
+				priorDayOHLC = PriorDayOHLC();
             }
         }
 
@@ -835,11 +842,62 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			
 			return true;
 		}
+		// ########################################### Prior Day OHLC #################################################################### //
+		private bool CheckPriorHiLowUpSignal()
+		{
+			if (!EnablePriorHiLowUpSignal)
+				return true;
+			
+			double priorHigh = priorDayOHLC.PriorHigh[0];
+			double highOffset = TicksOffsetHigh * TickSize;
+			
+			// Si le prix est au-dessus du prior high + offset, on autorise les signaux UP
+			// OU si le prix est entre les deux niveaux, on autorise aussi les signaux UP
+			return Close[0] > priorHigh + highOffset || 
+				(Close[0] <= priorHigh + highOffset && 
+					Close[0] >= priorDayOHLC.PriorLow[0] - TicksOffsetLow * TickSize);
+		}
 		
+		private bool CheckPriorHiLowDownSignal()
+		{
+			if (!EnablePriorHiLowDownSignal)
+				return true;
+			
+			double priorLow = priorDayOHLC.PriorLow[0];
+			double lowOffset = TicksOffsetLow * TickSize;
+			
+			// Si le prix est en-dessous du prior low - offset, on autorise les signaux DOWN
+			// OU si le prix est entre les deux niveaux, on autorise aussi les signaux DOWN
+			return Close[0] < priorLow - lowOffset || 
+				(Close[0] >= priorLow - lowOffset && 
+					Close[0] <= priorDayOHLC.PriorHigh[0] + TicksOffsetHigh * TickSize);
+		}
+		
+		private bool IsPriceInPriorRange()
+		{
+			if (!BlockSignalHiLowPriorRange)
+				return false;
+				
+			double priorHigh = priorDayOHLC.PriorHigh[0];
+			double priorLow = priorDayOHLC.PriorLow[0];
+			double highOffset = TicksOffsetHigh * TickSize;
+			double lowOffset = TicksOffsetLow * TickSize;
+			
+			double upperLimit = priorHigh + highOffset;
+			double lowerLimit = priorLow - lowOffset;
+			
+			return Close[0] >= lowerLimit && Close[0] <= upperLimit;
+		}
+		
+		// ############################################## Prior Day OHLC ################################################################# //
+
 		// ############################################################################################################### //
 
         private bool ShouldDrawUpArrow()
         {
+			if (IsPriceInPriorRange())
+				return false;
+			
 			// Vérifier si le prix est dans la Value Area précédente
 			if (BlockSignalsInPreviousValueArea && IsPriceInPreviousValueArea())
 				return false;
@@ -961,7 +1019,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				//(!useOpenForVAConditionUP || (Open[0] > dynamicLowerThreshold && Open[0] < dynamicUpperThreshold)) &&
 				//(!useLowForVAConditionUP || (Low[0] > dynamicLowerThreshold && Low[0] < dynamicUpperThreshold)) &&
 				(!UsePrevBarInVA || (Open[1] > dynamicLowerThreshold && Open[1] < dynamicUpperThreshold)) &&
-				(!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP));																						   
+				(!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP)) &&
+				(EnablePriorHiLowUpSignal ? CheckPriorHiLowUpSignal() : true);																						   
 
             double openCloseDiff = Math.Abs(Open[0] - Close[0]) / TickSize;
             double highLowDiff = Math.Abs(High[0] - Low[0]) / TickSize;
@@ -1005,6 +1064,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
         private bool ShouldDrawDownArrow()
         {
+			if (IsPriceInPriorRange())
+				return false;
+			
 			// Vérifier si le prix est dans la Value Area précédente
 			if (BlockSignalsInPreviousValueArea && IsPriceInPreviousValueArea())
 				return false;
@@ -1126,7 +1188,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				//(!useOpenForVAConditionDown || (Open[0] > dynamicLowerThreshold && Open[0] < dynamicUpperThreshold)) &&
 				//(!useHighForVAConditionDown || (High[0] > dynamicLowerThreshold && High[0] < dynamicUpperThreshold)) &&
 				(!UsePrevBarInVA || (Open[1] > dynamicLowerThreshold && Open[1] < dynamicUpperThreshold)) &&
-				(!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP));																							 
+				(!EnableDistanceFromVWAPCondition || (distanceInTicks >= MinDistanceFromVWAP && distanceInTicks <= MaxDistanceFromVWAP)) &&
+				(EnablePriorHiLowDownSignal ? CheckPriorHiLowDownSignal() : true);																							 
 
             double openCloseDiff = Math.Abs(Open[0] - Close[0]) / TickSize;
             double highLowDiff = Math.Abs(High[0] - Low[0]) / TickSize;
@@ -1603,6 +1666,30 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Display(Name = "VA/OC: Offset Multiplier", Description = "Multiplier for Value Area or Open-Close offset", Order = 3, GroupName = "0.05_Break Even Parameters")]
 		public double BreakEvenOffsetMultiplierVA { get; set; }
 		
+		// ################################ Prior Day OHLC ############################################## //
+		[NinjaScriptProperty]
+		[Display(Name="Enable Prior High Low Up Signal", Description="Activer la condition Prior High pour le signal UP", Order=1, GroupName="Prior Day OHLC")]
+		public bool EnablePriorHiLowUpSignal { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Enable Prior High Low Down Signal", Description="Activer la condition Prior Low pour le signal DOWN", Order=2, GroupName="Prior Day OHLC")]
+		public bool EnablePriorHiLowDownSignal { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, int.MaxValue)]
+		[Display(Name="Ticks Offset High", Description="Nombre de ticks au-dessus du Prior High", Order=3, GroupName="Prior Day OHLC")]
+		public int TicksOffsetHigh { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0, int.MaxValue)]
+		[Display(Name="Ticks Offset Low", Description="Nombre de ticks en-dessous du Prior Low", Order=4, GroupName="Prior Day OHLC")]
+		public int TicksOffsetLow { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name="Block Signals In Prior Range", Description="Bloquer les signaux quand le prix est dans la range du Prior Day", Order=5, GroupName="Prior Day OHLC")]
+		public bool BlockSignalHiLowPriorRange { get; set; }
+		private PriorDayOHLC priorDayOHLC;
+		// ################################ Prior Day OHLC ############################################## //
         #endregion
     }
 }
