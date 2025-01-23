@@ -237,18 +237,25 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				SelectedBreakEvenMode = BreakEvenMode.Disabled;
 				BreakEvenOffsetTicks = 5;
 				BreakEvenOffsetMultiplierVA = 0.5;
-				
+				// Prior Day OHLC
 				EnablePriorHiLowUpSignal = false;
 				EnablePriorHiLowDownSignal = false;
 				TicksOffsetHigh = 5;
 				TicksOffsetLow = 5;
 				BlockSignalHiLowPriorRange = false;
+				// Prior VA Vwap
+				UpperOffsetTicks = 5;
+				LowerOffsetTicks = 5;
+				UsePriorSvaUP = false;
+				UsePriorSvaDown = false;
+				BlockInPriorSVA = false;
 				
             }
             else if (State == State.Configure)
             {
                 ResetValues(DateTime.MinValue);
 				_posSize = PosSize;
+				newSession = true;
             }
             else if (State == State.DataLoaded)
             {
@@ -256,6 +263,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 VOLMA1 = VOLMA(Close, Convert.ToInt32(FperiodVol));
 				sessionIterator = new SessionIterator(Bars);
 				priorDayOHLC = PriorDayOHLC();
+				vwap = OrderFlowVWAP(VWAPResolution.Standard, Bars.TradingHours, VWAPStandardDeviations.Three, 1, 2, 3);
             }
         }
 
@@ -264,6 +272,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             if (CurrentBars[0] < 20)
                 return;
 			if (BarsInProgress != 0) return;
+			
+			UpdatePriorSessionBands();
+			if (!newSession) return;
 
 			bool isInTradingPeriod = IsInTradingPeriod(Time[0]);
             if (ClosePositionsOutsideHours && !isInTradingPeriod)
@@ -890,11 +901,77 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		}
 		
 		// ############################################## Prior Day OHLC ################################################################# //
-
-		// ############################################################################################################### //
+		// ############################################## Prior VA Vwap ################################################################# //
+		private void UpdatePriorSessionBands()
+		{
+			if (Bars.IsFirstBarOfSession)
+			{
+				newSession = true;
+				priorSessionUpperBand = vwap.StdDev1Upper[1] + (TickSize * UpperOffsetTicks);
+				priorSessionLowerBand = vwap.StdDev1Lower[1] - (TickSize * LowerOffsetTicks);
+			}
+		}
+	
+		private bool IsPriceWithinValueArea(double price)
+		{
+			return price >= priorSessionLowerBand && price <= priorSessionUpperBand;
+		}
+		
+		private bool ShouldAllowSignals(double price, bool isUpSignal)
+		{
+			bool isWithinVA = IsPriceWithinValueArea(price);
+			
+			// Si BlockInPriorSVA est activé et que le prix est dans la Value Area, bloquer tous les signaux
+			if (BlockInPriorSVA && isWithinVA)
+				return false;
+				
+			// Si le prix est dans la Value Area et qu'aucune option spéciale n'est activée
+			if (isWithinVA && !UsePriorSvaUP && !UsePriorSvaDown)
+				return true;
+				
+			// Pour les signaux UP
+			if (isUpSignal)
+			{
+				// Si UsePriorSvaUP est activé
+				if (UsePriorSvaUP)
+				{
+					// Autoriser dans la Value Area ou au-dessus
+					return isWithinVA || price > priorSessionUpperBand;
+				}
+				// Si UsePriorSvaDown est activé
+				else if (UsePriorSvaDown)
+				{
+					// Autoriser seulement dans la Value Area
+					return isWithinVA;
+				}
+			}
+			// Pour les signaux DOWN
+			else
+			{
+				// Si UsePriorSvaDown est activé
+				if (UsePriorSvaDown)
+				{
+					// Autoriser dans la Value Area ou en-dessous
+					return isWithinVA || price < priorSessionLowerBand;
+				}
+				// Si UsePriorSvaUP est activé
+				else if (UsePriorSvaUP)
+				{
+					// Autoriser seulement dans la Value Area
+					return isWithinVA;
+				}
+			}
+			
+			// Par défaut, autoriser les signaux
+			return true;
+		}
+		// ############################################## Prior VA Vwap ################################################################# //
 
         private bool ShouldDrawUpArrow()
         {
+			if (!ShouldAllowSignals(Close[0], true))
+				return false;
+			
 			if (IsPriceInPriorRange())
 				return false;
 			
@@ -1064,6 +1141,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
         private bool ShouldDrawDownArrow()
         {
+			if (!ShouldAllowSignals(Close[0], false))
+				return false;
+			
 			if (IsPriceInPriorRange())
 				return false;
 			
@@ -1690,6 +1770,34 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		public bool BlockSignalHiLowPriorRange { get; set; }
 		private PriorDayOHLC priorDayOHLC;
 		// ################################ Prior Day OHLC ############################################## //
+		// ############################ Prior VA Vwap ######################################### //
+		private OrderFlowVWAP vwap;
+		private double priorSessionUpperBand;
+		private double priorSessionLowerBand;
+		private bool newSession;
+		
+		[NinjaScriptProperty]
+		[Range(1, 100)]
+		[Display(Name = "Upper Offset Ticks", Description = "Number of ticks above upper band", Order=1, GroupName="Prior VA Vwap")]
+		public int UpperOffsetTicks { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(1, 100)]
+		[Display(Name = "Lower Offset Ticks", Description = "Number of ticks below lower band", Order=2, GroupName="Prior VA Vwap")]
+		public int LowerOffsetTicks { get; set; }
+	
+		[NinjaScriptProperty]
+		[Display(Name = "Use Prior SVA UP", Description = "Only up arrows when price above prior session VA", Order=3, GroupName="Prior VA Vwap")]
+		public bool UsePriorSvaUP { get; set; }
+	
+		[NinjaScriptProperty]
+		[Display(Name = "Use Prior SVA Down", Description = "Only down arrows when price below prior session VA", Order=4, GroupName="Prior VA Vwap")]
+		public bool UsePriorSvaDown { get; set; }
+	
+		[NinjaScriptProperty]
+		[Display(Name = "Block In Prior SVA", Description = "Block arrows inside prior session Value Area", Order=5, GroupName="Prior VA Vwap")]
+		public bool BlockInPriorSVA { get; set; }
+		// ############################ Prior VA Vwap ######################################### //
         #endregion
     }
 }
