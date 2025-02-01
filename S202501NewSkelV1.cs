@@ -108,6 +108,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		private double previousSessionDynamicUpperLevel = double.MinValue;
 		private double previousSessionDynamicLowerLevel = double.MaxValue;
 		private bool dynamicAreaPointsDrawn;
+		private int dynamicAreaDrawDelayMinutes;
 		private OrderFlowCumulativeDelta[] deltaIndicators;
 		private OrderFlowCumulativeDelta cumulativeDelta;
 		
@@ -220,6 +221,12 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				EnableDownBreakoutCheck = false;
 				DownBreakoutBars = 2;
 				DownBreakoutOffsetTicks = 1; // Doit être >= 1
+				
+				SelectedDynamicArea = DynamicAreaLevel.STD1;
+				BlockSignalsInPreviousDynamicArea = false;
+				DynamicAreaOffsetTicks = 0;
+				dynamicAreaPointsDrawn = false;
+				DynamicAreaDrawDelayMinutes = 59;
 				
 				// VA Stop Target Module defaults
 				StopTargetReference = StopTargetReferenceType.ValueArea;
@@ -394,7 +401,8 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 figVAPointsDrawn = true;
             }
 			//
-			if (timeSinceReset.TotalMinutes >= figVA && !dynamicAreaPointsDrawn)
+			// if (timeSinceReset.TotalMinutes >= figVA && !dynamicAreaPointsDrawn)
+			if (timeSinceReset.TotalMinutes >= DynamicAreaDrawDelayMinutes && !dynamicAreaPointsDrawn)
 			{
 				double dynamicUpperLevel = 0;
 				double dynamicLowerLevel = 0;
@@ -1625,6 +1633,13 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Range(0, int.MaxValue)]
 		[Display(Name="Dynamic Area Offset Ticks", Description="Offset en ticks pour la Dynamic Area précédente", Order=3, GroupName="1.6_Dynamic Area Parameters")]
 		public int DynamicAreaOffsetTicks { get; set; }
+		[NinjaScriptProperty]
+        [Display(Name = "DynamicAreaDrawDelayMinutes", Order = 4, GroupName = "1.6_Dynamic Area Parameters")]
+        public int DynamicAreaDrawDelayMinutes
+        {
+            get { return dynamicAreaDrawDelayMinutes; }
+            set { dynamicAreaDrawDelayMinutes = value; }
+        }
 		
         // ############ Volume #############
         // Volume
