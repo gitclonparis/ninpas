@@ -256,7 +256,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				UsePriorSvaUP = false;
 				UsePriorSvaDown = false;
 				BlockInPriorSVA = false;
-				
             }
             else if (State == State.Configure)
             {
@@ -869,9 +868,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			
 			double priorHigh = priorDayOHLC.PriorHigh[0];
 			double highOffset = TicksOffsetHigh * TickSize;
-			
-			// Si le prix est au-dessus du prior high + offset, on autorise les signaux UP
-			// OU si le prix est entre les deux niveaux, on autorise aussi les signaux UP
 			return Close[0] > priorHigh + highOffset || 
 				(Close[0] <= priorHigh + highOffset && 
 					Close[0] >= priorDayOHLC.PriorLow[0] - TicksOffsetLow * TickSize);
@@ -884,9 +880,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			
 			double priorLow = priorDayOHLC.PriorLow[0];
 			double lowOffset = TicksOffsetLow * TickSize;
-			
-			// Si le prix est en-dessous du prior low - offset, on autorise les signaux DOWN
-			// OU si le prix est entre les deux niveaux, on autorise aussi les signaux DOWN
 			return Close[0] < priorLow - lowOffset || 
 				(Close[0] >= priorLow - lowOffset && 
 					Close[0] <= priorDayOHLC.PriorHigh[0] + TicksOffsetHigh * TickSize);
@@ -969,12 +962,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 					return isWithinVA;
 				}
 			}
-			
-			// Par défaut, autoriser les signaux
 			return true;
 		}
 		// ############################################## Prior VA Vwap ################################################################# //
-
+		
         private bool ShouldDrawUpArrow()
         {
 			if (!ShouldAllowSignals(Close[0], true))
@@ -1343,8 +1334,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			
 			dynamicAreaPointsDrawn = false;					  
 			volumeMaxS = 0;	  
-			// previousVAUpperLevel = double.MinValue;
-			// previousVALowerLevel = double.MaxValue;
         }
 		// ############################################################################# //
 		
@@ -1680,11 +1669,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
         [Browsable(false)]
         [XmlIgnore]
         public Series<double> StdDev1Lower => Values[4];
-		
-		// Ajout des nouvelles propriétés dans la section Properties
-		// [NinjaScriptProperty]
-		// [Display(Name = "Use VA Stop Target", Description = "Use Value Area for Stop and Target calculations", Order = 1, GroupName = "0.04_VA Stop Target Module")]
-		// public bool UseVaStopTarget { get; set; }
 		
 		public enum StopTargetReferenceType
 		{
