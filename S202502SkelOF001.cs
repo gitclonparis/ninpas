@@ -283,6 +283,11 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				downParameters[1].Enabled = false;
 				downParameters[1].Min = 10;
 				downParameters[1].Max = 50;
+				
+				BullishEngulfing = false;
+				ThreeWhiteSoldiers = false;
+				BearishEngulfing = false;
+				ThreeBlackCrows = false;
             }
             else if (State == State.Configure)
             {
@@ -1003,9 +1008,48 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			return true;
 		}
 		// ############################################## Prior VA Vwap ################################################################# //
+		// ############################################## CheckBullishPatterns ################################################################# //
+		private bool CheckBullishPatterns()
+		{
+			bool hasSignal = false;
+		
+			if (BullishEngulfing && CandlestickPattern(ChartPattern.BullishEngulfing, 0)[0] == 1)
+			{
+				hasSignal = true;
+			}
+		
+			if (ThreeWhiteSoldiers && CandlestickPattern(ChartPattern.ThreeWhiteSoldiers, 0)[0] == 1)
+			{
+				hasSignal = true;
+			}
+		
+			return hasSignal;
+		}
+		
+		private bool CheckBearishPatterns()
+		{
+			bool hasSignal = false;
+		
+			if (BearishEngulfing && CandlestickPattern(ChartPattern.BearishEngulfing, 0)[0] == 1)
+			{
+				hasSignal = true;
+			}
+		
+			if (ThreeBlackCrows && CandlestickPattern(ChartPattern.ThreeBlackCrows, 0)[0] == 1)
+			{
+				hasSignal = true;
+			}
+		
+			return hasSignal;
+		}
+		// ############################################## CheckBearishPatterns ################################################################# //
 		
         private bool ShouldDrawUpArrow()
         {
+			bool candlestickPattern = CheckBullishPatterns();
+			 if (!candlestickPattern && (BullishEngulfing || ThreeWhiteSoldiers))
+				 return false;
+			
 			if (!ShouldAllowSignals(Close[0], true))
 				return false;
 			
@@ -1195,6 +1239,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
         private bool ShouldDrawDownArrow()
         {
+			bool candlestickPattern = CheckBearishPatterns();
+			if (!candlestickPattern && (BearishEngulfing || ThreeBlackCrows))
+				return false;
+			
 			if (!ShouldAllowSignals(Close[0], false))
 				return false;
 			
@@ -1950,6 +1998,23 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			set { downParameters[1].Max = value; }
 		}
 		// ############################ DeltaPercentDOWN ######################################### //
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Bullish Engulfing", Order = 1, GroupName = "Candlestick Patterns UP")]
+		public bool BullishEngulfing { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Three White Soldiers", Order = 2, GroupName = "Candlestick Patterns UP")]
+		public bool ThreeWhiteSoldiers { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Bearish Engulfing", Order = 1, GroupName = "Candlestick Patterns DOWN")]
+		public bool BearishEngulfing { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Three Black Crows", Order = 2, GroupName = "Candlestick Patterns DOWN")]
+		public bool ThreeBlackCrows { get; set; }
+		
         #endregion
     }
 }

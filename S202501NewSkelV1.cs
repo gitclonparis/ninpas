@@ -256,6 +256,13 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				UsePriorSvaUP = false;
 				UsePriorSvaDown = false;
 				BlockInPriorSVA = false;
+				
+				BullishEngulfing = false;
+				ThreeWhiteSoldiers = false;
+				Doji = false;
+				Hammer = false;
+				BearishEngulfing = false;
+				ThreeBlackCrows = false;
             }
             else if (State == State.Configure)
             {
@@ -965,9 +972,56 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			return true;
 		}
 		// ############################################## Prior VA Vwap ################################################################# //
+		// ############################################## CheckBullishPatterns ################################################################# //
+		private bool CheckBullishPatterns()
+		{
+			bool hasSignal = false;
+		
+			if (BullishEngulfing && CandlestickPattern(ChartPattern.BullishEngulfing, 0)[0] == 1)
+			{
+				hasSignal = true;
+			}
+		
+			if (ThreeWhiteSoldiers && CandlestickPattern(ChartPattern.ThreeWhiteSoldiers, 0)[0] == 1)
+			{
+				hasSignal = true;
+			}
+			if (Doji && CandlestickPattern(ChartPattern.Doji, 0)[0] == 1)
+			{
+				hasSignal = true;
+			}
+			if (Hammer && CandlestickPattern(ChartPattern.Hammer, 0)[0] == 1)
+			{
+				hasSignal = true;
+			}
+		
+			return hasSignal;
+		}
+		
+		private bool CheckBearishPatterns()
+		{
+			bool hasSignal = false;
+		
+			if (BearishEngulfing && CandlestickPattern(ChartPattern.BearishEngulfing, 0)[0] == 1)
+			{
+				hasSignal = true;
+			}
+		
+			if (ThreeBlackCrows && CandlestickPattern(ChartPattern.ThreeBlackCrows, 0)[0] == 1)
+			{
+				hasSignal = true;
+			}
+		
+			return hasSignal;
+		}
+		// ############################################## CheckBearishPatterns ################################################################# //
 		
         private bool ShouldDrawUpArrow()
         {
+			bool candlestickPattern = CheckBullishPatterns();
+			 if (!candlestickPattern && (BullishEngulfing || ThreeWhiteSoldiers || Doji || Hammer))
+				 return false;
+			 
 			if (!ShouldAllowSignals(Close[0], true))
 				return false;
 			
@@ -1140,6 +1194,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
         private bool ShouldDrawDownArrow()
         {
+			bool candlestickPattern = CheckBearishPatterns();
+			if (!candlestickPattern && (BearishEngulfing || ThreeBlackCrows))
+				return false;
+			
 			if (!ShouldAllowSignals(Close[0], false))
 				return false;
 			
@@ -1797,6 +1855,31 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Display(Name = "Block In Prior SVA", Description = "Block arrows inside prior session Value Area", Order=5, GroupName="Prior VA Vwap")]
 		public bool BlockInPriorSVA { get; set; }
 		// ############################ Prior VA Vwap ######################################### //
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Bullish Engulfing", Order = 1, GroupName = "Candlestick Patterns UP")]
+		public bool BullishEngulfing { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Three White Soldiers", Order = 2, GroupName = "Candlestick Patterns UP")]
+		public bool ThreeWhiteSoldiers { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Doji", Order = 3, GroupName = "Candlestick Patterns UP")]
+		public bool Doji { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Hammer", Order = 4, GroupName = "Candlestick Patterns UP")]
+		public bool Hammer { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Bearish Engulfing", Order = 1, GroupName = "Candlestick Patterns DOWN")]
+		public bool BearishEngulfing { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Three Black Crows", Order = 2, GroupName = "Candlestick Patterns DOWN")]
+		public bool ThreeBlackCrows { get; set; }
+		
         #endregion
     }
 }
