@@ -263,6 +263,14 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				Hammer = false;
 				BearishEngulfing = false;
 				ThreeBlackCrows = false;
+				
+				// Valeurs par défaut
+                ImbalanceRatio = 2.0;
+                MinDelta = 100;
+                MinBullishImbalanceCount = 3;
+                MinBearishImbalanceCount = 3;
+                UseImbalanceUP = true;
+                UseImbalanceDown = true;
             }
             else if (State == State.Configure)
             {
@@ -276,6 +284,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 VOLMA1 = VOLMA(Close, Convert.ToInt32(FperiodVol));
 				sessionIterator = new SessionIterator(Bars);
 				priorDayOHLC = PriorDayOHLC();
+				tickSize = Instrument.MasterInstrument.TickSize;
 				vwap = OrderFlowVWAP(VWAPResolution.Standard, Bars.TradingHours, VWAPStandardDeviations.Three, 1, 2, 3);
             }
         }
@@ -1015,9 +1024,62 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			return hasSignal;
 		}
 		// ############################################## CheckBearishPatterns ################################################################# //
+		// ############################################## ImbalanceRatio ################################################################# //
+		private void EvaluateImbalances(out int bullishCount, out int bearishCount)
+        {
+            bullishCount = 0;
+            bearishCount = 0;
+
+            var volBarType = Bars.BarsSeries.BarsType as NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType;
+            if (volBarType == null)
+                return;
+
+            // Parcourt tous les niveaux de la barre (de Low à High, par incréments de tickSize)
+            for (double price = Low[0]; price <= High[0]; price += tickSize)
+            {
+                double askLevel = price + tickSize;  // Comparaison en diagonale : volume Ask au niveau "price + tickSize"
+                long bidVol = volBarType.Volumes[CurrentBar].GetBidVolumeForPrice(price);
+                long askVol = volBarType.Volumes[CurrentBar].GetAskVolumeForPrice(askLevel);
+
+                // Si aucun volume n'est présent, passer à l'itération suivante
+                if (bidVol == 0 && askVol == 0)
+                    continue;
+
+                // Imbalance acheteuse : on vérifie si le volume Ask est suffisamment supérieur au volume Bid
+                // Formule : deltaup = askVol - bidVol et ratioAskBid = askVol / bidVol
+                if (bidVol > 0)
+                {
+                    long deltaup = askVol - bidVol;
+                    double ratioAskBid = (double)askVol / bidVol;
+                    if (ratioAskBid >= ImbalanceRatio && deltaup >= MinDelta)
+                    {
+                        bullishCount++;
+                    }
+                }
+
+                // Imbalance vendeuse : on vérifie si le volume Bid est suffisamment supérieur au volume Ask
+                // Formule : deltadown = bidVol - askVol et ratioBidAsk = bidVol / askVol
+                if (askVol > 0)
+                {
+                    long deltadown = bidVol - askVol;
+                    double ratioBidAsk = (double)bidVol / askVol;
+                    if (ratioBidAsk >= ImbalanceRatio && deltadown >= MinDelta)
+                    {
+                        bearishCount++;
+                    }
+                }
+            }
+        }
+		// ############################################## ImbalanceRatio ################################################################# //
+		
 		
         private bool ShouldDrawUpArrow()
         {
+			EvaluateImbalances(out bullishCount, out bearishCount);
+			
+			if (UseImbalanceUP && bullishCount < MinBullishImbalanceCount)
+				return false;
+			
 			bool candlestickPattern = CheckBullishPatterns();
 			 if (!candlestickPattern && (BullishEngulfing || ThreeWhiteSoldiers || Doji || Hammer))
 				 return false;
@@ -1194,6 +1256,10 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 
         private bool ShouldDrawDownArrow()
         {
+			EvaluateImbalances(out bullishCount, out bearishCount);
+			if (UseImbalanceDown && bearishCount < MinBearishImbalanceCount)
+				return false;
+			
 			bool candlestickPattern = CheckBearishPatterns();
 			if (!candlestickPattern && (BearishEngulfing || ThreeBlackCrows))
 				return false;
@@ -1879,6 +1945,51 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[NinjaScriptProperty]
 		[Display(Name = "Three Black Crows", Order = 2, GroupName = "Candlestick Patterns DOWN")]
 		public bool ThreeBlackCrows { get; set; }
+		
+		// ############################ Imbalance ######################################### //
+		private double tickSize;
+        private SolidColorBrush transRed;
+        private SolidColorBrush transGreen;
+		private int bullishCount;
+		private int bearishCount;
+
+        [NinjaScriptProperty]
+        [Display(Name = "Imbalance Ratio", 
+                 Description = "Ratio minimal entre le volume dominant et le volume faible (ex. 2 signifie qu’un côté doit être au moins 2 fois supérieur à l’autre)", 
+                 Order = 1, GroupName = "Imbalance")]
+        public double ImbalanceRatio { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Minimum Delta", 
+                 Description = "Delta minimum requis (différence entre les volumes) pour déclencher le signal", 
+                 Order = 2, GroupName = "Imbalance")]
+        public long MinDelta { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Min Bullish Imbalance Count", 
+                 Description = "Nombre minimal d'imbalances acheteuses requis pour afficher la flèche haussière", 
+                 Order = 3, GroupName = "Imbalance")]
+        public int MinBullishImbalanceCount { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Min Bearish Imbalance Count", 
+                 Description = "Nombre minimal d'imbalances vendeuses requis pour afficher la flèche baissière", 
+                 Order = 4, GroupName = "Imbalance")]
+        public int MinBearishImbalanceCount { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Use Imbalance UP", 
+                 Description = "Si activé, affiche la flèche haussière (UP) lorsque la condition est remplie", 
+                 Order = 5, GroupName = "Imbalance")]
+        public bool UseImbalanceUP { get; set; }
+
+        [NinjaScriptProperty]
+        [Display(Name = "Use Imbalance Down", 
+                 Description = "Si activé, affiche la flèche baissière (DOWN) lorsque la condition est remplie", 
+                 Order = 6, GroupName = "Imbalance")]
+        public bool UseImbalanceDown { get; set; }
+		
+		// ############################ Imbalance ######################################### //
 		
         #endregion
     }
