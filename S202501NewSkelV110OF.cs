@@ -24,7 +24,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 
 namespace NinjaTrader.NinjaScript.Strategies.ninpas
 {
-    public class S202501NewSkelV1 : Strategy
+    public class S202501NewSkelV110OF : Strategy
     {
 		// Breaking Even Module Constants
         private const string LongPos = "Open Long";
@@ -109,8 +109,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		private double previousSessionDynamicLowerLevel = double.MaxValue;
 		private bool dynamicAreaPointsDrawn;
 		private int dynamicAreaDrawDelayMinutes;
-		private OrderFlowCumulativeDelta[] deltaIndicators;
-		private OrderFlowCumulativeDelta cumulativeDelta;
 		
 		// Nouvelles variables privées
 		private double _vaRef;
@@ -124,7 +122,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             if (State == State.SetDefaults)
             {
                 Description = @"Indicateur BVA-Limusine combiné";
-                Name = "S202501NewSkelV1";
+                Name = "S202501NewSkelV110OF";
                 Calculate = Calculate.OnEachTick;
                 IsOverlay = true;
                 DisplayInDataBox = true;
@@ -257,13 +255,18 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 				UsePriorSvaDown = false;
 				BlockInPriorSVA = false;
 				
-				BullishEngulfing = false;
-				ThreeWhiteSoldiers = false;
-				Doji = false;
-				Hammer = false;
-				BearishEngulfing = false;
-				ThreeBlackCrows = false;
+				// Slope Filter defaults
+				SlopeStartBars = 5;
+				SlopeEndBars = 0;
+				MinVwapSessionSlopeUp = 0.30;
+				MinVwapResetSlopeUp = 0.30;
+				MinStdUpperSlopeUp = 0.30;
+				MinStdLowerSlopeUp = 0.30;
 				
+				MaxVwapSessionSlopeDown = -0.30;
+				MaxVwapResetSlopeDown = -0.30;
+				MaxStdUpperSlopeDown = -0.30;
+				MaxStdLowerSlopeDown = -0.30;
 				// Valeurs par défaut
                 ImbalanceRatio = 2.0;
                 MinDelta = 100;
@@ -271,6 +274,36 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 MinBearishImbalanceCount = 3;
                 UseImbalanceUP = true;
                 UseImbalanceDown = true;
+				
+				//POC barre
+				pocConditionEnabled = false;
+				pocTicksDistance = 2;
+				
+				// Initialiser le tableau upParameters
+				upParameters = new VolumetricParameters[7]; // ou la taille dont vous avez besoin
+				for (int i = 0; i < upParameters.Length; i++)
+				{
+					upParameters[i] = new VolumetricParameters();
+				}
+		
+				// Définir les valeurs par défaut pour Delta Percent UP
+				upParameters[1].Enabled = false;
+				upParameters[1].Min = 10;
+				upParameters[1].Max = 50;
+				
+				// Initialiser downParameters
+				downParameters = new VolumetricParameters[7]; // ou la taille dont vous avez besoin
+				for (int i = 0; i < downParameters.Length; i++)
+				{
+					downParameters[i] = new VolumetricParameters();
+				}
+		
+				// Définir les valeurs par défaut pour Delta Percent DOWN
+				downParameters[1].Enabled = false;
+				downParameters[1].Min = 10;
+				downParameters[1].Max = 50;
+				
+				
             }
             else if (State == State.Configure)
             {
@@ -284,8 +317,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 VOLMA1 = VOLMA(Close, Convert.ToInt32(FperiodVol));
 				sessionIterator = new SessionIterator(Bars);
 				priorDayOHLC = PriorDayOHLC();
-				tickSize = Instrument.MasterInstrument.TickSize;
+				tickSize = Instrument.MasterInstrument.TickSize;									
 				vwap = OrderFlowVWAP(VWAPResolution.Standard, Bars.TradingHours, VWAPStandardDeviations.Three, 1, 2, 3);
+				pocSeries = new Series<double>(this);
             }
         }
 
@@ -295,6 +329,9 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 return;
 			if (BarsInProgress != 0) return;
 			
+			if (CurrentBar < 20 || !(Bars.BarsSeries.BarsType is NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType barsType))
+				return;
+																													   
 			UpdatePriorSessionBands();
 			if (!newSession) return;
 
@@ -308,6 +345,13 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 return;
             }
 			
+			// Calcul du POC
+			var currentBarVolumes = barsType.Volumes[CurrentBar];
+			double pocPrice;
+			long maxVolume = currentBarVolumes.GetMaximumVolume(null, out pocPrice);
+			pocSeries[0] = pocPrice;
+			Values[0][0] = pocPrice;
+				   
 			figVA = ResetPeriod - 1;
             DateTime currentBarTime = Time[0];
             bool shouldReset = false;
@@ -981,49 +1025,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			return true;
 		}
 		// ############################################## Prior VA Vwap ################################################################# //
-		// ############################################## CheckBullishPatterns ################################################################# //
-		private bool CheckBullishPatterns()
-		{
-			bool hasSignal = false;
-		
-			if (BullishEngulfing && CandlestickPattern(ChartPattern.BullishEngulfing, 0)[0] == 1)
-			{
-				hasSignal = true;
-			}
-		
-			if (ThreeWhiteSoldiers && CandlestickPattern(ChartPattern.ThreeWhiteSoldiers, 0)[0] == 1)
-			{
-				hasSignal = true;
-			}
-			if (Doji && CandlestickPattern(ChartPattern.Doji, 0)[0] == 1)
-			{
-				hasSignal = true;
-			}
-			if (Hammer && CandlestickPattern(ChartPattern.Hammer, 0)[0] == 1)
-			{
-				hasSignal = true;
-			}
-		
-			return hasSignal;
-		}
-		
-		private bool CheckBearishPatterns()
-		{
-			bool hasSignal = false;
-		
-			if (BearishEngulfing && CandlestickPattern(ChartPattern.BearishEngulfing, 0)[0] == 1)
-			{
-				hasSignal = true;
-			}
-		
-			if (ThreeBlackCrows && CandlestickPattern(ChartPattern.ThreeBlackCrows, 0)[0] == 1)
-			{
-				hasSignal = true;
-			}
-		
-			return hasSignal;
-		}
-		// ############################################## CheckBearishPatterns ################################################################# //
 		// ############################################## ImbalanceRatio ################################################################# //
 		private void EvaluateImbalances(out int bullishCount, out int bearishCount)
         {
@@ -1071,7 +1072,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             }
         }
 		// ############################################## ImbalanceRatio ################################################################# //
-		
+																																			 
 		
         private bool ShouldDrawUpArrow()
         {
@@ -1080,10 +1081,6 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			if (UseImbalanceUP && bullishCount < MinBullishImbalanceCount)
 				return false;
 			
-			bool candlestickPattern = CheckBullishPatterns();
-			 if (!candlestickPattern && (BullishEngulfing || ThreeWhiteSoldiers || Doji || Hammer))
-				 return false;
-			 
 			if (!ShouldAllowSignals(Close[0], true))
 				return false;
 			
@@ -1094,7 +1091,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			if (BlockSignalsInPreviousValueArea && IsPriceInPreviousValueArea())
 				return false;
 			
-		// Vérifier si le prix est dans la Dynamic Area précédente
+			// Vérifier si le prix est dans la Dynamic Area précédente
 			if (BlockSignalsInPreviousDynamicArea && IsPriceInPreviousDynamicArea())
 				return false;
 																				
@@ -1207,7 +1204,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 (!OKisUpperBreakoutCountExceeded || upperBreakoutCount < MaxUpperBreakouts) &&
                 (!useOpenForVAConditionUP || (Open[0] > lowerThreshold && Open[0] < upperThreshold)) &&
                 (!useLowForVAConditionUP || (Low[0] > lowerThreshold && Low[0] < upperThreshold)) &&
-				(!UsePrevBarInVA || (Open[1] > lowerThreshold && Open[1] < upperThreshold)) &&
+				// (!UsePrevBarInVA || (Open[1] > lowerThreshold && Open[1] < upperThreshold)) &&
 				//(!useOpenForVAConditionUP || (Open[0] > dynamicLowerThreshold && Open[0] < dynamicUpperThreshold)) &&
 				//(!useLowForVAConditionUP || (Low[0] > dynamicLowerThreshold && Low[0] < dynamicUpperThreshold)) &&
 				(!UsePrevBarInVA || (Open[1] > dynamicLowerThreshold && Open[1] < dynamicUpperThreshold)) &&
@@ -1222,9 +1219,61 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             bool std3Condition = !EnableSTD3HighLowTracking || Values[7][0] >= highestSTD3Upper;
             bool rangeBreakoutCondition = !EnablePreviousSessionRangeBreakout || 
                 (previousSessionHighStd1Upper != double.MinValue && Close[0] > previousSessionHighStd1Upper);
+			
+			bool pocCondition = true;
+			if (pocConditionEnabled)
+			{
+				pocCondition = pocSeries[0] <= Close[0] - pocTicksDistance * TickSize;
+			}
+			
+			bool deltaPercentCondition = true;
+			if (DeltaPercentUPEnabled)
+			{
+				var barsType = Bars.BarsSeries.BarsType as NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType;
+				if (barsType != null)
+				{
+					double deltaPercent = barsType.Volumes[CurrentBar].GetDeltaPercent();
+					deltaPercentCondition = (deltaPercent >= MinDeltaPercentUP && deltaPercent <= MaxDeltaPercentUP); 
+				}
+			}
             
             // return bvaCondition && limusineCondition && std3Condition && rangeBreakoutCondition;
-			bool showUpArrow = bvaCondition && limusineCondition && std3Condition && rangeBreakoutCondition;
+			bool showUpArrow = bvaCondition && limusineCondition && std3Condition && rangeBreakoutCondition && pocCondition && deltaPercentCondition;
+			
+			if (CurrentBar >= SlopeStartBars)
+			{
+				// VWAP Session
+				if (UseVwapSessioSlopeFilterUp)
+				{
+					double vwapSessionSlope = Slope(VWAP, SlopeStartBars, SlopeEndBars);
+					if (vwapSessionSlope < MinVwapSessionSlopeUp)
+						showUpArrow = false;
+				}
+				
+				// VWAP Reset
+				if (UseVwapSlopeFilterUp)
+				{
+					double vwapResetSlope = Slope(Values[0], SlopeStartBars, SlopeEndBars);
+					if (vwapResetSlope < MinVwapResetSlopeUp)
+						showUpArrow = false;
+				}
+				
+				// STD1 Upper
+				if (UseStdUpperSloperUP)
+				{
+					double stdUpperSlope = Slope(Values[3], SlopeStartBars, SlopeEndBars);
+					if (stdUpperSlope < MinStdUpperSlopeUp)
+						showUpArrow = false;
+				}
+				
+				// STD1 Lower
+				if (UseStdLowerUP)
+				{
+					double stdLowerSlope = Slope(Values[4], SlopeStartBars, SlopeEndBars);
+					if (stdLowerSlope < MinStdLowerSlopeUp)
+						showUpArrow = false;
+				}
+			}
 			
 			// Condition de cassure du plus haut des X dernières barres si activé
 			if (EnableUpBreakoutCheck)
@@ -1259,11 +1308,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 			EvaluateImbalances(out bullishCount, out bearishCount);
 			if (UseImbalanceDown && bearishCount < MinBearishImbalanceCount)
 				return false;
-			
-			bool candlestickPattern = CheckBearishPatterns();
-			if (!candlestickPattern && (BearishEngulfing || ThreeBlackCrows))
-				return false;
-			
+														  
 			if (!ShouldAllowSignals(Close[0], false))
 				return false;
 			
@@ -1387,7 +1432,7 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
                 (!OKisLowerBreakoutCountExceeded || lowerBreakoutCount < MaxLowerBreakouts) &&
                 (!useOpenForVAConditionDown || (Open[0] > lowerThreshold && Open[0] < upperThreshold)) &&
                 (!useHighForVAConditionDown || (High[0] > lowerThreshold && High[0] < upperThreshold)) &&
-				(!UsePrevBarInVA || (Open[1] > lowerThreshold && Open[1] < upperThreshold)) &&
+				// (!UsePrevBarInVA || (Open[1] > lowerThreshold && Open[1] < upperThreshold)) &&
 				//(!useOpenForVAConditionDown || (Open[0] > dynamicLowerThreshold && Open[0] < dynamicUpperThreshold)) &&
 				//(!useHighForVAConditionDown || (High[0] > dynamicLowerThreshold && High[0] < dynamicUpperThreshold)) &&
 				(!UsePrevBarInVA || (Open[1] > dynamicLowerThreshold && Open[1] < dynamicUpperThreshold)) &&
@@ -1403,8 +1448,62 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
             bool rangeBreakoutCondition = !EnablePreviousSessionRangeBreakout || 
                 (previousSessionLowStd1Lower != double.MaxValue && Close[0] < previousSessionLowStd1Lower);
             
+			bool pocCondition = true;
+			if (pocConditionEnabled)
+			{
+				pocCondition = pocSeries[0] >= Close[0] + pocTicksDistance * TickSize;
+			}
+			
+			bool deltaPercentCondition = true;
+			if (DeltaPercentDOWNEnabled)
+			{
+				var barsType = Bars.BarsSeries.BarsType as NinjaTrader.NinjaScript.BarsTypes.VolumetricBarsType;
+				if (barsType != null)
+				{
+					double deltaPercent = barsType.Volumes[CurrentBar].GetDeltaPercent();
+					deltaPercentCondition = (deltaPercent >= MinDeltaPercentDOWN && deltaPercent <= MaxDeltaPercentDOWN);
+			
+				}
+			}
+			
+			
             // return bvaCondition && limusineCondition && std3Condition && rangeBreakoutCondition;
-			bool showDownArrow = bvaCondition && limusineCondition && std3Condition && rangeBreakoutCondition;
+			bool showDownArrow = bvaCondition && limusineCondition && std3Condition && rangeBreakoutCondition && pocCondition && deltaPercentCondition;
+			
+			if (CurrentBar >= SlopeStartBars)
+			{
+				// VWAP Session
+				if (UseVwapSessioSlopeFilterDown)
+				{
+					double vwapSessionSlope = Slope(VWAP, SlopeStartBars, SlopeEndBars);
+					if (vwapSessionSlope > MaxVwapSessionSlopeDown)
+						showDownArrow = false;
+				}
+				
+				// VWAP Reset
+				if (UseVwapSlopeFilterDown)
+				{
+					double vwapResetSlope = Slope(Values[0], SlopeStartBars, SlopeEndBars);
+					if (vwapResetSlope > MaxVwapResetSlopeDown)
+						showDownArrow = false;
+				}
+				
+				// STD1 Upper
+				if (UseStdUpperSloperDown)
+				{
+					double stdUpperSlope = Slope(Values[3], SlopeStartBars, SlopeEndBars);
+					if (stdUpperSlope > MaxStdUpperSlopeDown)
+						showDownArrow = false;
+				}
+				
+				// STD1 Lower
+				if (UseStdLowerDown)
+				{
+					double stdLowerSlope = Slope(Values[4], SlopeStartBars, SlopeEndBars);
+					if (stdLowerSlope > MaxStdLowerSlopeDown)
+						showDownArrow = false;
+				}
+			}
 			
 			if (EnableDownBreakoutCheck)
 			{
@@ -1921,30 +2020,91 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
 		[Display(Name = "Block In Prior SVA", Description = "Block arrows inside prior session Value Area", Order=5, GroupName="Prior VA Vwap")]
 		public bool BlockInPriorSVA { get; set; }
 		// ############################ Prior VA Vwap ######################################### //
+		// ############################ Slope Filter Properties ######################################### //
+		[NinjaScriptProperty]
+		[Range(1, 20)]
+		[Display(Name = "Slope Start Bars", Description = "Number of bars ago to start slope calculation", Order = 1, GroupName = "Slope Filter")]
+		public int SlopeStartBars { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name = "Bullish Engulfing", Order = 1, GroupName = "Candlestick Patterns UP")]
-		public bool BullishEngulfing { get; set; }
+		[Range(0, 10)]
+		[Display(Name = "Slope End Bars", Description = "Number of bars ago to end slope calculation", Order = 2, GroupName = "Slope Filter")]
+		public int SlopeEndBars { get; set; }
+		
+		// Pour UP
+		[NinjaScriptProperty]
+		[Display(Name = "Use VWAP Session Slope Filter UP", GroupName = "Slope Filter UP")]
+		public bool UseVwapSessioSlopeFilterUp { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name = "Three White Soldiers", Order = 2, GroupName = "Candlestick Patterns UP")]
-		public bool ThreeWhiteSoldiers { get; set; }
+		[Range(0.0, 10.0)]
+		[Display(Name = "Min VWAP Session Slope UP", Description = "Minimum VWAP session slope value for UP signals", GroupName = "Slope Filter UP")]
+		public double MinVwapSessionSlopeUp { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name = "Doji", Order = 3, GroupName = "Candlestick Patterns UP")]
-		public bool Doji { get; set; }
+		[Display(Name = "Use VWAP Reset Slope Filter UP", GroupName = "Slope Filter UP")]
+		public bool UseVwapSlopeFilterUp { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name = "Hammer", Order = 4, GroupName = "Candlestick Patterns UP")]
-		public bool Hammer { get; set; }
+		[Range(0.0, 10.0)]
+		[Display(Name = "Min VWAP Reset Slope UP", Description = "Minimum VWAP reset slope value for UP signals", GroupName = "Slope Filter UP")]
+		public double MinVwapResetSlopeUp { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name = "Bearish Engulfing", Order = 1, GroupName = "Candlestick Patterns DOWN")]
-		public bool BearishEngulfing { get; set; }
+		[Display(Name = "Use STD1 Upper Slope Filter UP", GroupName = "Slope Filter UP")]
+		public bool UseStdUpperSloperUP { get; set; }
 		
 		[NinjaScriptProperty]
-		[Display(Name = "Three Black Crows", Order = 2, GroupName = "Candlestick Patterns DOWN")]
-		public bool ThreeBlackCrows { get; set; }
+		[Range(0.0, 10.0)]
+		[Display(Name = "Min STD1 Upper Slope UP", Description = "Minimum STD1 Upper slope value for UP signals", GroupName = "Slope Filter UP")]
+		public double MinStdUpperSlopeUp { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Use STD1 Lower Slope Filter UP", GroupName = "Slope Filter UP")]
+		public bool UseStdLowerUP { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(0.0, 10.0)]
+		[Display(Name = "Min STD1 Lower Slope UP", Description = "Minimum STD1 Lower slope value for UP signals", GroupName = "Slope Filter UP")]
+		public double MinStdLowerSlopeUp { get; set; }
+		
+		// Pour DOWN
+		[NinjaScriptProperty]
+		[Display(Name = "Use VWAP Session Slope Filter DOWN", GroupName = "Slope Filter DOWN")]
+		public bool UseVwapSessioSlopeFilterDown { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(-10.0, 0.0)]
+		[Display(Name = "Max VWAP Session Slope DOWN", Description = "Maximum VWAP session slope value for DOWN signals", GroupName = "Slope Filter DOWN")]
+		public double MaxVwapSessionSlopeDown { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Use VWAP Reset Slope Filter DOWN", GroupName = "Slope Filter DOWN")]
+		public bool UseVwapSlopeFilterDown { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(-10.0, 0.0)]
+		[Display(Name = "Max VWAP Reset Slope DOWN", Description = "Maximum VWAP reset slope value for DOWN signals", GroupName = "Slope Filter DOWN")]
+		public double MaxVwapResetSlopeDown { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Use STD1 Upper Slope Filter DOWN", GroupName = "Slope Filter DOWN")]
+		public bool UseStdUpperSloperDown { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(-10.0, 0.0)]
+		[Display(Name = "Max STD1 Upper Slope DOWN", Description = "Maximum STD1 Upper slope value for DOWN signals", GroupName = "Slope Filter DOWN")]
+		public double MaxStdUpperSlopeDown { get; set; }
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Use STD1 Lower Slope Filter DOWN", GroupName = "Slope Filter DOWN")]
+		public bool UseStdLowerDown { get; set; }
+		
+		[NinjaScriptProperty]
+		[Range(-10.0, 0.0)]
+		[Display(Name = "Max STD1 Lower Slope DOWN", Description = "Maximum STD1 Lower slope value for DOWN signals", GroupName = "Slope Filter DOWN")]
+		public double MaxStdLowerSlopeDown { get; set; }
+		// ############################ Slope Filter Properties ######################################### //
 		
 		// ############################ Imbalance ######################################### //
 		private double tickSize;
@@ -1990,6 +2150,90 @@ namespace NinjaTrader.NinjaScript.Strategies.ninpas
         public bool UseImbalanceDown { get; set; }
 		
 		// ############################ Imbalance ######################################### //
+		// ############################ POC Parameters ######################################### //
+		private bool pocConditionEnabled;
+		private int pocTicksDistance;
+		private Series<double> pocSeries;
+		[NinjaScriptProperty]
+				
+		[Display(Name="Enable POC Condition", Description="Enable the Point of Control condition", Order=1, GroupName="POC Parameters")]
+		public bool POCConditionEnabled
+		{
+			get { return pocConditionEnabled; }
+			set { pocConditionEnabled = value; }
+		}
+		
+		[NinjaScriptProperty]
+		[Range(0, 100)]
+		[Display(Name="POC Ticks Distance", Description="Number of ticks for POC distance from close", Order=2, GroupName="POC Parameters")]
+		public int POCTicksDistance
+		{
+			get { return pocTicksDistance; }
+			set { pocTicksDistance = Math.Max(0, value); }
+		}
+		// ############################ POC Parameters ######################################### //
+		// ############################ DeltaPercentUP ######################################### //
+		private class VolumetricParameters
+		{
+			public bool Enabled { get; set; }
+			public double Min { get; set; }
+			public double Max { get; set; }
+		}
+		private VolumetricParameters[] upParameters;
+		
+			
+		[NinjaScriptProperty]
+		[Display(Name = "Delta Percent UP Enabled", Order = 1, GroupName = "DeltaPercentUP")]
+		public bool DeltaPercentUPEnabled
+		{
+			get { return upParameters[1].Enabled; }
+			set { upParameters[1].Enabled = value; }
+		}
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Min Delta Percent UP", Order = 2, GroupName = "DeltaPercentUP")]
+		public double MinDeltaPercentUP
+		{
+			get { return upParameters[1].Min; }
+			set { upParameters[1].Min = value; }
+		}
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Max Delta Percent UP", Order = 3, GroupName = "DeltaPercentUP")]
+		public double MaxDeltaPercentUP
+		{
+			get { return upParameters[1].Max; }
+			set { upParameters[1].Max = value; }
+		}
+		// ############################ DeltaPercentUP ######################################### //
+		// ############################ DeltaPercentDOWN ######################################### //
+		private VolumetricParameters[] downParameters;
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Delta Percent DOWN Enabled", Order = 1, GroupName = "DeltaPercentDOWN")]
+		public bool DeltaPercentDOWNEnabled
+		{
+			get { return downParameters[1].Enabled; }
+			set { downParameters[1].Enabled = value; }
+		}
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Min Delta Percent DOWN", Order = 2, GroupName = "DeltaPercentDOWN")]
+		public double MinDeltaPercentDOWN
+		{
+			get { return downParameters[1].Min; }
+			set { downParameters[1].Min = value; }
+		}
+		
+		[NinjaScriptProperty]
+		[Display(Name = "Max Delta Percent DOWN", Order = 3, GroupName = "DeltaPercentDOWN")]
+		public double MaxDeltaPercentDOWN
+		{
+			get { return downParameters[1].Max; }
+			set { downParameters[1].Max = value; }
+		}
+		// ############################ DeltaPercentDOWN ######################################### //
+		
 		
         #endregion
     }
